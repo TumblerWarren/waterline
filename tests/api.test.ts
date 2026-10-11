@@ -723,6 +723,59 @@ describe('household API isolation and permissions', () => {
   });
 });
 describe('household invitations', () => {
+  it('discovers and accepts pending access by verified email without a link', async () => {
+    await call('invitations', 'owner', 'POST', { email: 'INVITEE@example.com', role: 'operator' });
+    const pending = await (await call('invitations/pending', 'new-user')).json();
+    expect(pending.invitations).toHaveLength(1);
+    expect(pending.invitations[0]).toMatchObject({ householdName: 'Our home', role: 'operator' });
+    expect(pending.invitations[0].token_hash).toBeUndefined();
+    expect((await call('invitations/pending', 'wrong-user')).status).toBe(200);
+    expect((await (await call('invitations/pending', 'wrong-user')).json()).invitations).toEqual(
+      [],
+    );
+    const invitationId = pending.invitations[0].id;
+    expect((await call('invitations/accept', 'wrong-user', 'POST', { invitationId })).status).toBe(
+      410,
+    );
+    expect((await call('invitations/accept', 'new-user', 'POST', { invitationId })).status).toBe(
+      200,
+    );
+    expect(
+      sqlite.prepare('SELECT role FROM memberships WHERE subject = ?').get('new-user')?.role,
+    ).toBe('operator');
+    expect((await (await call('invitations/pending', 'new-user')).json()).invitations).toEqual([]);
+    expect((await call('invitations/accept', 'new-user', 'POST', { invitationId })).status).toBe(
+      410,
+    );
+  });
+  it('does not expose or accept expired and revoked email access', async () => {
+    await call('invitations', 'owner', 'POST', { email: 'invitee@example.com', role: 'viewer' });
+    const id = sqlite.prepare('SELECT id FROM invitations').get()?.id;
+    sqlite.exec('UPDATE invitations SET expires_at=1');
+    expect((await (await call('invitations/pending', 'new-user')).json()).invitations).toEqual([]);
+    expect(
+      (await call('invitations/accept', 'new-user', 'POST', { invitationId: id })).status,
+    ).toBe(410);
+    sqlite.exec('DELETE FROM invitations');
+    expect(
+      (await call('invitations/accept', 'new-user', 'POST', { invitationId: id })).status,
+    ).toBe(410);
+  });
+  it('requires authentication and verified email for pending access', async () => {
+    expect((await call('invitations/pending', '')).status).toBe(401);
+    const auth = await import('../worker/auth');
+    vi.mocked(auth.verifiedEmail).mockRejectedValueOnce(
+      new auth.HttpError(403, 'Verify your email.'),
+    );
+    expect((await call('invitations/pending', 'new-user')).status).toBe(403);
+    vi.mocked(auth.verifiedEmail).mockRejectedValueOnce(
+      new auth.HttpError(403, 'Verify your email.'),
+    );
+    expect(
+      (await call('invitations/accept', 'new-user', 'POST', { invitationId: 'test' })).status,
+    ).toBe(403);
+  });
+
   async function create() {
     const response = await call('invitations', 'owner', 'POST', {
       email: 'invitee@example.com',

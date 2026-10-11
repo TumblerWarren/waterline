@@ -19,6 +19,9 @@ import {
 export function useHousehold(preview: boolean) {
   const session = useSession();
   const [demo, setDemo] = useState(initialHousehold);
+  const [pendingInvitations, setPendingInvitations] = useState<
+    Array<{ id: string; householdName: string; role: 'viewer' | 'operator'; expiresAt: number }>
+  >([]);
   const [live, setLive] = useState<Household | null>(null);
   const [scenario, setScenario] = useState<Scenario>('normal');
   const [role, setRole] = useState<Role>('owner');
@@ -57,8 +60,17 @@ export function useHousehold(preview: boolean) {
     setError('');
     try {
       setLive(await request<Household>('/api/household'));
+      setPendingInvitations([]);
     } catch (error) {
       setLive(null);
+      try {
+        setPendingInvitations(
+          (await request<{ invitations: typeof pendingInvitations }>('/api/invitations/pending'))
+            .invitations,
+        );
+      } catch {
+        setPendingInvitations([]);
+      }
       setError(error instanceof Error ? error.message : 'Unable to load your household.');
     } finally {
       setLoading(false);
@@ -68,6 +80,7 @@ export function useHousehold(preview: boolean) {
     let active = true;
     if (preview || !session.authenticated) {
       setLive(null);
+      setPendingInvitations([]);
       return;
     }
     setLoading(true);
@@ -79,10 +92,19 @@ export function useHousehold(preview: boolean) {
         .then((data) => {
           if (active) {
             setLive(data);
+            setPendingInvitations([]);
             setError('');
           }
         })
-        .catch((error) => {
+        .catch(async (error) => {
+          try {
+            const data = await request<{ invitations: typeof pendingInvitations }>(
+              '/api/invitations/pending',
+            );
+            if (active) setPendingInvitations(data.invitations);
+          } catch {
+            if (active) setPendingInvitations([]);
+          }
           if (active) {
             setError(error instanceof Error ? error.message : 'Unable to load your household.');
           }
@@ -349,6 +371,7 @@ export function useHousehold(preview: boolean) {
   }
   return {
     household,
+    pendingInvitations,
     scenario,
     role,
     setRole,

@@ -1,3 +1,4 @@
+import { SignInFeedback } from './components/SignInFeedback';
 import { ThemedSelect } from './components/ThemedSelect';
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import {
@@ -11,7 +12,6 @@ import {
   CheckCheck,
   CircleHelp,
   Clock3,
-  Copy,
   Droplet,
   FlaskConical,
   Gauge,
@@ -133,7 +133,6 @@ export default function App() {
   const [toast, setToast] = useState<{ text: string; error: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
-  const [invitationUrl, setInvitationUrl] = useState<string | null>(null);
   const [inviteCreated, setInviteCreated] = useState(false);
   const [range, setRange] = useState<'24h' | '7d'>('24h');
   const [now, setNow] = useState(Date.now);
@@ -252,12 +251,24 @@ export default function App() {
       setBusy(false);
     }
   }
+  const [signInPending, setSignInPending] = useState(false);
+  const [signInError, setSignInError] = useState<string>();
   function signIn() {
+    if (signInPending) return;
     if (!session.configured) {
       setModal('signin');
       return;
     }
-    void run(session.login);
+    setSignInError(undefined);
+    setSignInPending(true);
+    void session
+      .login()
+      .catch(() => {
+        setSignInError(
+          'Check your connection and try signing in again. Your household data is safe.',
+        );
+      })
+      .finally(() => setSignInPending(false));
   }
   const condition = readingCondition(home?.reading ?? null, now);
   const reading = home?.reading;
@@ -304,11 +315,10 @@ export default function App() {
     event.preventDefault();
     const values = new FormData(event.currentTarget);
     await run(async () => {
-      const link = await model.invite(
+      await model.invite(
         String(values.get('email')).trim().toLowerCase(),
         values.get('role') as 'viewer' | 'operator',
       );
-      setInvitationUrl(link);
       setInviteCreated(true);
     });
   };
@@ -336,10 +346,15 @@ export default function App() {
   ) {
     return (
       <>
+        <SignInFeedback
+          pending={signInPending}
+          error={signInError}
+          dismiss={() => setSignInError(undefined)}
+        />
         <LandingPage
           native={isNative}
           loading={session.loading}
-          error={session.error}
+          error={signInError || session.error}
           signIn={signIn}
           nearby={() => {
             setSourcePreference('bluetooth');
@@ -364,6 +379,11 @@ export default function App() {
   }
   return (
     <div className="app-shell">
+      <SignInFeedback
+        pending={signInPending}
+        error={signInError}
+        dismiss={() => setSignInError(undefined)}
+      />
       <a className="skip-link" href="#main">
         Skip to content
       </a>
@@ -602,8 +622,32 @@ export default function App() {
                   {session.emailVerified === false ? (
                     <p className="message warning">Verify your email before joining a household.</p>
                   ) : null}
+                  {model.pendingInvitations.map((invite) => (
+                    <div className="panel email-join-card" key={invite.id}>
+                      <h2>Join {invite.householdName}</h2>
+                      <p>Your verified email has been added with {invite.role} access.</p>
+                      <button
+                        className="button primary"
+                        disabled={busy}
+                        onClick={() =>
+                          void run(async () => {
+                            await model.request('/api/invitations/accept', 'POST', {
+                              invitationId: invite.id,
+                              name: session.name,
+                            });
+                            await model.refresh();
+                          }, 'Welcome to your household.')
+                        }
+                      >
+                        Join household
+                        <ArrowRight size={16} />
+                      </button>
+                    </div>
+                  ))}
                   <p className="message warning">
-                    {model.error || 'Your household is being prepared.'}
+                    {model.pendingInvitations.length
+                      ? 'Choose your household above to finish joining.'
+                      : model.error || 'Ask the owner to add your email address, then try again.'}
                   </p>
                   <button className="button secondary" onClick={() => void model.refresh()}>
                     Try again
@@ -1117,7 +1161,6 @@ export default function App() {
                       disabled={!owner}
                       onClick={() => {
                         setInviteCreated(false);
-                        setInvitationUrl(null);
                         setModal('invite');
                       }}
                     >
@@ -1272,7 +1315,7 @@ export default function App() {
               {page === 'settings' ? (
                 <>
                   <section className="panel app-info">
-                    <h2>Waterline 0.2.2</h2>
+                    <h2>Waterline 0.2.3</h2>
                     <p>Your household’s tank, connected through Cloud or nearby Bluetooth.</p>
                   </section>
                   <div className="page-heading">
@@ -1468,7 +1511,10 @@ export default function App() {
           role={toast.error ? 'alert' : 'status'}
         >
           {toast.error ? <TriangleAlert size={18} /> : <CheckCheck size={18} />}
-          <span>{toast.text}</span>
+          <div className="feedback-copy">
+            {toast.error ? <strong>Could not complete the request</strong> : null}
+            <span>{toast.text}</span>
+          </div>
           <button
             className="icon-button"
             onClick={() => setToast(null)}
@@ -1552,7 +1598,7 @@ export default function App() {
       ) : null}
       {modal === 'invite' ? (
         <Dialog
-          title={inviteCreated ? 'Invitation prepared' : 'A place for your family.'}
+          title={inviteCreated ? 'Email added' : 'A place for your family.'}
           close={() => setModal(null)}
         >
           {inviteCreated ? (
@@ -1563,26 +1609,9 @@ export default function App() {
               <p>
                 {preview
                   ? 'This is a preview invitation. No email was sent, and it cannot be used to join a household.'
-                  : 'Share this invitation link with the person you invited. They must sign in with that verified email address.'}
+                  : 'Email added. They can sign in with this verified email address and tap Join household. No link is needed.'}
               </p>
-              {invitationUrl ? (
-                <>
-                  <label htmlFor="invitation-link">Private invitation link</label>
-                  <input id="invitation-link" value={invitationUrl} readOnly />
-                  <button
-                    className="button primary full-width"
-                    onClick={() =>
-                      void run(
-                        () => navigator.clipboard.writeText(invitationUrl),
-                        'Invitation link copied.',
-                      )
-                    }
-                  >
-                    <Copy size={16} />
-                    Copy invitation link
-                  </button>
-                </>
-              ) : null}
+
               <button className="button secondary full-width" onClick={() => setModal(null)}>
                 Done
               </button>
@@ -1613,10 +1642,10 @@ export default function App() {
               <p className="dialog-footnote">
                 {preview
                   ? 'Preview only. No invitation email will be sent.'
-                  : 'You’ll get a private link to share. It expires in seven days.'}
+                  : 'They can join after signing in with this verified email. Pending access expires in seven days.'}
               </p>
               <button className="button primary full-width" disabled={busy} type="submit">
-                {busy ? 'Preparing…' : 'Create invitation'}
+                {busy ? 'Preparing…' : 'Add email'}
                 <ArrowRight size={16} />
               </button>
             </form>
@@ -1745,4 +1774,3 @@ export default function App() {
     </div>
   );
 }
-

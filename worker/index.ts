@@ -133,15 +133,18 @@ async function snapshot(env: ApiEnv, member: Membership): Promise<Household> {
 }
 async function acceptInvitation(request: Request, env: ApiEnv, identity: Identity) {
   const data = await body(request);
-  if (typeof data.token !== 'string' || !/^[a-f0-9]{64}$/.test(data.token))
-    throw new HttpError(400, 'Invalid invitation.');
+  const byEmail = typeof data.invitationId === 'string' && data.invitationId.length <= 80;
+  if (!byEmail && (typeof data.token !== 'string' || !/^[a-f0-9]{64}$/.test(data.token)))
+    throw new HttpError(400, 'Choose a pending household invitation.');
   const email = await verifiedEmail(identity, env.AUTH0_DOMAIN);
-  const tokenHash = await hash(data.token);
+  const tokenHash = byEmail ? '' : await hash(data.token as string);
   const invite = await env.DB.prepare(
-    'SELECT * FROM invitations WHERE token_hash = ? AND expires_at > ? AND email = ?',
+    byEmail
+      ? 'SELECT * FROM invitations WHERE id = ? AND expires_at > ? AND email = ?'
+      : 'SELECT * FROM invitations WHERE token_hash = ? AND expires_at > ? AND email = ?',
   )
-    .bind(tokenHash, Date.now(), email)
-    .first<{ id: string; household_id: string; role: Role }>();
+    .bind(byEmail ? data.invitationId : tokenHash, Date.now(), email)
+    .first<{ id: string; household_id: string; role: Role; token_hash: string }>();
   if (!invite)
     throw new HttpError(410, 'This invitation is unavailable or belongs to another email address.');
   if (
@@ -158,7 +161,15 @@ async function acceptInvitation(request: Request, env: ApiEnv, identity: Identit
   const result = await env.DB.batch([
     env.DB.prepare(
       'INSERT INTO memberships (id, household_id, subject, name, email, role) SELECT ?, household_id, ?, ?, email, role FROM invitations WHERE id = ? AND token_hash = ? AND expires_at > ? AND email = ?',
-    ).bind(crypto.randomUUID(), identity.subject, name, invite.id, tokenHash, Date.now(), email),
+    ).bind(
+      crypto.randomUUID(),
+      identity.subject,
+      name,
+      invite.id,
+      invite.token_hash,
+      Date.now(),
+      email,
+    ),
     env.DB.prepare(
       'DELETE FROM invitations WHERE id = ? AND EXISTS (SELECT 1 FROM memberships WHERE subject = ? AND household_id = ?)',
     ).bind(invite.id, identity.subject, invite.household_id),
@@ -197,6 +208,19 @@ export const api = {
       const identity = await authenticate(request, env.AUTH0_DOMAIN, env.AUTH0_AUDIENCE);
       if (!['GET', 'HEAD'].includes(request.method) && !allowedOrigin(request))
         throw new HttpError(403, 'Use the household app to make changes.');
+      if (url.pathname === '/api/invitations/pending' && request.method === 'GET') {
+        const email = await verifiedEmail(identity, env.AUTH0_DOMAIN);
+        const existing = await env.DB.prepare('SELECT id FROM memberships WHERE subject = ?')
+          .bind(identity.subject)
+          .first();
+        if (existing) return response({ invitations: [] });
+        const invitations = await env.DB.prepare(
+          'SELECT i.id, h.name AS householdName, i.role, i.expires_at AS expiresAt FROM invitations i JOIN households h ON h.id = i.household_id WHERE i.email = ? AND i.expires_at > ? ORDER BY i.expires_at DESC',
+        )
+          .bind(email, Date.now())
+          .all();
+        return response({ invitations: invitations.results });
+      }
       if (url.pathname === '/api/invitations/accept' && request.method === 'POST')
         return await acceptInvitation(request, env, identity);
       const member = await membership(env, identity);

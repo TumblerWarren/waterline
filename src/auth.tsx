@@ -43,7 +43,7 @@ interface NativeAuth {
 }
 const nativeAuth = registerPlugin<NativeAuth>('WaterlineAuth');
 const unavailable = async (): Promise<never> => {
-  throw new Error('Sign-in is not available yet. You can explore the preview.');
+  throw new Error('Sign-in is not configured. Use the installed Android app.');
 };
 const defaultSession: Session = {
   configured: false,
