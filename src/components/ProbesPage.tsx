@@ -46,7 +46,7 @@ export function ProbesPage({
           const c = probe.calibration;
           const gap = c?.dryReady && c.wetReady ? c.wet - c.dry : null;
           return (
-            <article className="panel probe-detail" key={probe.gpio}>
+            <article className={`panel probe-detail probe-level-${probe.level}`} key={probe.gpio}>
               <div className="settings-heading">
                 <h2>{probe.level}% probe</h2>
                 <span className="probe-contact">

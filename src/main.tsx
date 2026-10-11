@@ -2,13 +2,17 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Authentication } from './auth';
 import App from './App';
+import { NearbyProvider } from './components/NearbyBoard';
 import './styles.css';
+import './redesign.css';
 import { isNative } from './native';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <Authentication>
-      <App />
+      <NearbyProvider>
+        <App />
+      </NearbyProvider>
     </Authentication>
   </StrictMode>,
 );

@@ -79,6 +79,26 @@ export function CalibrationPage({
             {Math.max(0, Math.ceil((120000 - (now - command!.requestedAt)) / 1000))} seconds.
           </p>
         ) : null}
+        {capturing ? (
+          <div className="calibration-progress" role="status">
+            <strong>Capturing readings</strong>
+            {reading?.probes
+              .filter((p) => p.calibration?.capture !== 'none')
+              .map((p) => (
+                <div key={p.gpio}>
+                  <span>
+                    {p.level}% · {p.calibration?.cycles ?? 0}/{p.calibration?.targetCycles ?? 20}{' '}
+                    cycles
+                  </span>
+                  <progress
+                    aria-label={`${p.level}% probe capture`}
+                    max={p.calibration?.targetCycles ?? 20}
+                    value={p.calibration?.cycles ?? 0}
+                  />
+                </div>
+              ))}
+          </div>
+        ) : null}
         {preview ? <p>Preview only. Physical calibration is available after signing in.</p> : null}
         {home.role !== 'owner' ? <p>Only the household owner can start calibration.</p> : null}
         {command ? (

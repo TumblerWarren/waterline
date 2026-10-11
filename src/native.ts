@@ -37,3 +37,36 @@ export function useNativeNavigation(onBack: () => void, onInvite: (token: string
   }, []);
 }
 export const minimizeApp = () => NativeApp.minimizeApp();
+
+export function useMotionVisibility(resume: () => void) {
+  const resumeRef = useRef(resume);
+  resumeRef.current = resume;
+  useEffect(() => {
+    let nativeActive = true;
+    let disposed = false;
+    let listener: PluginListenerHandle | undefined;
+    const update = () => {
+      const hidden = !nativeActive || document.visibilityState === 'hidden';
+      document.documentElement.classList.toggle('app-hidden', hidden);
+      if (!hidden) resumeRef.current();
+    };
+    update();
+    document.addEventListener('visibilitychange', update);
+    if (isNative)
+      void NativeApp.addListener('appStateChange', (state) => {
+        nativeActive = state.isActive;
+        update();
+      })
+        .then((handle) => {
+          if (disposed) void handle.remove();
+          else listener = handle;
+        })
+        .catch(() => undefined);
+    return () => {
+      disposed = true;
+      document.removeEventListener('visibilitychange', update);
+      void listener?.remove();
+      document.documentElement.classList.remove('app-hidden');
+    };
+  }, []);
+}

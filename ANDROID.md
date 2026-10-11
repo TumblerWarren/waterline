@@ -84,3 +84,5 @@ Phone alarm notifications are installed and the cloud sender is configured. A re
 
 Nearby Bluetooth readings and controls are installed in version 0.1.14. Pairing is separate from cloud accounts; see BLUETOOTH.md for offline setup and revocation.
 
+
+Latest Android build: 0.2.1 (versionCode 17), installed successfully. Preview removed. APK: releases/waterline-0.2.1-redesign.apk. See REDESIGN.md for changes and verification limits.

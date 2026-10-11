@@ -5,7 +5,7 @@ const config: CapacitorConfig = {
   appName: 'Waterline',
   webDir: 'dist/client',
   server: { androidScheme: 'https', cleartext: false },
-  android: { backgroundColor: '#f5f7f3' },
+  android: { backgroundColor: '#f3f8ff' },
   plugins: {
     PushNotifications: { presentationOptions: ['sound', 'alert'] },
     SystemBars: { style: 'DARK', insetsHandling: 'native', initialViewportFitValueHint: 'contain' },

@@ -17,6 +17,7 @@ export function LevelAlarms({
   save,
   acknowledge,
   transport = 'cloud',
+  externalBusy = false,
 }: {
   home: Household;
   now: number;
@@ -25,6 +26,7 @@ export function LevelAlarms({
   save: (rules: AlarmRule[]) => Promise<void>;
   acknowledge: (alarms: LevelAlarm[]) => Promise<void>;
   transport?: 'cloud' | 'bluetooth';
+  externalBusy?: boolean;
 }) {
   const [rules, setRules] = useState(() => home.alarmSettings?.rules ?? defaultAlarmRules());
   const [busy, setBusy] = useState(false),
@@ -43,7 +45,7 @@ export function LevelAlarms({
       : message;
   const active = reported?.filter((a) => a.active) ?? [];
   const connected = canTestBuzzer(home.role, home.reading, now);
-  const canAck = !preview && mayOperate(home.role) && connected && !busy;
+  const canAck = !preview && mayOperate(home.role) && connected && !busy && !externalBusy;
   const pending = home.alarmAcknowledgements?.some(
     (a) =>
       a.status === 'queued' && active.some((r) => r.level === a.level && r.episode === a.episode),
@@ -91,9 +93,9 @@ export function LevelAlarms({
         <form onSubmit={submit}>
           {rules.map((r) => (
             <fieldset
-              className="level-alarm-rule"
+              className={`level-alarm-rule probe-level-${r.level}`}
               key={r.level}
-              disabled={home.role !== 'owner' || busy}
+              disabled={home.role !== 'owner' || busy || externalBusy || (!preview && !connected)}
             >
               <legend>{r.level === 20 ? 'Below 20%' : `${r.level}% probe`}</legend>
               <label className="setting-row">
@@ -136,7 +138,11 @@ export function LevelAlarms({
               ) : null}
             </fieldset>
           ))}
-          <button className="button primary" type="submit" disabled={home.role !== 'owner' || busy}>
+          <button
+            className="button primary"
+            type="submit"
+            disabled={home.role !== 'owner' || busy || externalBusy || (!preview && !connected)}
+          >
             {busy ? 'Saving…' : 'Save buzzer alarms'}
           </button>
           <p role="status">
@@ -157,7 +163,7 @@ export function LevelAlarms({
               (ack) => ack.level === r.level && ack.episode === a?.episode,
             );
             return (
-              <div className="setting-row" key={r.level}>
+              <div className={`setting-row alarm-row probe-level-${r.level}`} key={r.level}>
                 <span>
                   <strong>
                     {r.level === 20 ? 'Below 20%' : `${r.level}%`} ·{' '}

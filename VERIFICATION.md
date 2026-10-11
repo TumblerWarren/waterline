@@ -175,3 +175,5 @@ SHA-256: `E3978D7647F82BD17F902BDE5E828DAF69C8D5C6D4532FD8E0DB11A8174023BE`
 
 
 
+
+2026-10-11 update: The earlier 0.1.0 preview notes above are historical. The live backend, Auth0, push and Bluetooth integrations exist now. Redesign 0.2.1 removes preview entry points; 123 tests, TypeScript, Android build and lint passed; installed on phone. See REDESIGN.md for remaining physical interaction checks.

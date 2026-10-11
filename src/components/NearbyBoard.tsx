@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { BleClient } from '@capacitor-community/bluetooth-le';
 import {
   BLE_SERVICE,
@@ -7,17 +7,12 @@ import {
   nearbyReading,
   nearbySettings,
 } from '../../shared/nearby';
-import {
-  bandLabels,
-  type Reading,
-  type Household,
-  type AlarmRule,
-  type LevelAlarm,
-} from '../../shared/model';
-import { ProbesPage } from './ProbesPage';
-import { LevelAlarms } from './LevelAlarms';
+import { type Reading, type Household, type AlarmRule, type LevelAlarm } from '../../shared/model';
+import { isNative } from '../native';
+import { Bluetooth, ShieldCheck, WifiOff } from 'lucide-react';
 
-export function NearbyBoard({ cloudAvailable = true }: { cloudAvailable?: boolean }) {
+function useNearbyState() {
+  const [cloudAvailable, setCloudAvailable] = useState(true);
   const [connected, setConnected] = useState(false),
     [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('Use Bluetooth when your board has no Wi-Fi or internet.'),
@@ -26,11 +21,14 @@ export function NearbyBoard({ cloudAvailable = true }: { cloudAvailable?: boolea
     working = useRef(false),
     alive = useRef(true);
   const autoAttempted = useRef(false);
+  const activeTarget = useRef('');
   const readingRef = useRef(reading);
   readingRef.current = reading;
   async function command(action: string) {
     const target = device.current;
     if (!target) throw new Error('Connect to the nearby board first.');
+    if (activeTarget.current && activeTarget.current !== target)
+      throw new Error('Bluetooth connection changed. Please retry.');
     const id = crypto.randomUUID().slice(0, 8);
     const bytes = new TextEncoder().encode(`${id}|${action}`);
     await BleClient.write(target, BLE_SERVICE, BLE_REQUEST, new DataView(bytes.buffer));
@@ -72,15 +70,18 @@ export function NearbyBoard({ cloudAvailable = true }: { cloudAvailable?: boolea
   async function perform(task: () => Promise<void>) {
     if (working.current) throw new Error('Wait for the current board request.');
     working.current = true;
+    activeTarget.current = device.current;
     setBusy(true);
     try {
       await task();
     } finally {
       working.current = false;
+      activeTarget.current = '';
       if (alive.current) setBusy(false);
     }
   }
   async function disconnect() {
+    if (working.current) throw new Error('Wait for the current board request.');
     localStorage.removeItem('waterline-nearby-device');
     const id = device.current;
     device.current = '';
@@ -133,6 +134,7 @@ export function NearbyBoard({ cloudAvailable = true }: { cloudAvailable?: boolea
     });
   }
   useEffect(() => {
+    if (!isNative) return;
     if (cloudAvailable) {
       autoAttempted.current = false;
       return;
@@ -140,8 +142,10 @@ export function NearbyBoard({ cloudAvailable = true }: { cloudAvailable?: boolea
     if (device.current || working.current || autoAttempted.current) return;
     const saved = localStorage.getItem('waterline-nearby-device');
     if (!saved) return;
-    autoAttempted.current = true;
-    const timer = window.setTimeout(() => void connect(saved).catch(() => undefined), 2000);
+    const timer = window.setTimeout(() => {
+      autoAttempted.current = true;
+      void connect(saved).catch(() => undefined);
+    }, 2000);
     return () => window.clearTimeout(timer);
   }, [cloudAvailable]);
   useEffect(() => {
@@ -168,8 +172,6 @@ export function NearbyBoard({ cloudAvailable = true }: { cloudAvailable?: boolea
       if (id) void BleClient.disconnect(id).catch(() => undefined);
     };
   }, []);
-  const now = Date.now();
-  const fresh = !!reading?.measuredAt && now - reading.measuredAt < 15000;
   const localHome: Household = {
     id: 'nearby',
     name: 'Nearby board',
@@ -201,77 +203,92 @@ export function NearbyBoard({ cloudAvailable = true }: { cloudAvailable?: boolea
       await refresh();
     });
   }
+  return {
+    connected,
+    busy,
+    status,
+    reading,
+    localHome,
+    connect,
+    disconnect,
+    control,
+    save,
+    acknowledge,
+    setCloudAvailable,
+  };
+}
+const NearbyContext = createContext<ReturnType<typeof useNearbyState> | null>(null);
+export function NearbyProvider({ children }: { children: ReactNode }) {
+  const value = useNearbyState();
+  return <NearbyContext.Provider value={value}>{children}</NearbyContext.Provider>;
+}
+export function useNearby() {
+  const value = useContext(NearbyContext);
+  if (!value) throw new Error('NearbyProvider is required.');
+  return value;
+}
+export function NearbyBoard() {
+  const nearby = useNearby();
   return (
-    <details className="panel nearby-panel" open={!cloudAvailable || connected}>
-      <summary>
-        <strong>Nearby board · Bluetooth</strong>
-        {connected ? ' · Connected' : ''}
-      </summary>
-      <p role="status">{status}</p>
-      <p>
-        After you connect once, Waterline tries that paired board when cloud readings are
-        unavailable. Bluetooth works nearby while the app is open.
-      </p>
-      <p>
-        First pairing: open the board’s local <strong>Bluetooth setup page (/bluetooth)</strong>{' '}
-        using its admin login. Keep that private six-digit code for Android’s pairing prompt. Paired
-        phones have local control access independently of cloud accounts. Revoke phones on that
-        setup page.
-      </p>
-      <button
-        className="button secondary"
-        disabled={busy}
-        onClick={() =>
-          void (connected ? disconnect() : connect()).catch((e) => setStatus(String(e)))
-        }
-      >
-        {busy ? 'Please wait…' : connected ? 'Disconnect Bluetooth' : 'Connect nearby board'}
-      </button>
-      {connected && reading ? (
-        <>
-          <h2>{bandLabels[reading.band]}</h2>
+    <section className="bluetooth-workspace">
+      <div className="page-heading">
+        <div>
+          <p className="eyebrow">CLOSER TO HOME</p>
+          <h1>Connect nearby.</h1>
+          <p>Your board, even without internet.</p>
+        </div>
+      </div>
+      <div className={`panel bluetooth-card ${nearby.connected ? 'is-connected' : ''}`}>
+        <div className="bluetooth-orb">
+          <Bluetooth size={46} />
+        </div>
+        <span className="status-pill">
+          {nearby.connected ? 'Connected over Bluetooth' : 'Not connected'}
+        </span>
+        <h2>{nearby.connected ? 'Waterline · Rooftop' : 'Your tank is a tap away.'}</h2>
+        <p role="status">{nearby.status}</p>
+        <button
+          className="button primary"
+          disabled={!isNative || nearby.busy}
+          onClick={() =>
+            void (nearby.connected ? nearby.disconnect() : nearby.connect()).catch((e) =>
+              console.error(e),
+            )
+          }
+        >
+          {nearby.busy
+            ? 'Please wait…'
+            : nearby.connected
+              ? 'Disconnect Bluetooth'
+              : 'Connect nearby board'}
+        </button>
+        {!isNative ? <p>Bluetooth pairing is available in the Android app.</p> : null}
+        {nearby.connected ? (
           <p>
-            Live nearby reading. Cloud history and remote phone notifications resume when the board
-            reconnects to internet.
+            Live readings and controls are available in Overview, Probes and Alarm. Choose Bluetooth
+            in the connection selector.
           </p>
-          <ProbesPage reading={reading} now={now} preview={false} />
-          <div className="nearby-actions">
-            {['test', 'enable', 'disable'].map((action) => (
-              <button
-                key={action}
-                className="button secondary"
-                disabled={busy || !fresh}
-                onClick={() => void control(action).catch((e) => setStatus(String(e)))}
-              >
-                {action === 'test'
-                  ? 'Test buzzer · 10 seconds'
-                  : action === 'enable'
-                    ? 'Enable local alarm'
-                    : 'Disable local alarm'}
-              </button>
-            ))}
-          </div>
-          <p>A buzzer test disables automatic sound; enable the local alarm again afterward.</p>
-          <LevelAlarms
-            home={localHome}
-            now={now}
-            preview={false}
-            save={save}
-            acknowledge={acknowledge}
-            transport="bluetooth"
-          />
-          <LevelAlarms
-            key={reading.alarmRevision}
-            home={localHome}
-            now={now}
-            preview={false}
-            edit
-            save={save}
-            acknowledge={acknowledge}
-            transport="bluetooth"
-          />
-        </>
-      ) : null}
-    </details>
+        ) : null}
+      </div>
+      <div className="panel bluetooth-guide">
+        <h2>First connection</h2>
+        <ol>
+          <li>Keep Bluetooth on and move close to your board.</li>
+          <li>Tap Connect nearby board and select Waterline-Rooftop.</li>
+          <li>
+            Accept Android pairing and enter your private six-digit code from the board’s local
+            Bluetooth setup page (/bluetooth).
+          </li>
+        </ol>
+        <p>
+          <ShieldCheck size={18} /> Bluetooth is encrypted. Pairing grants local control
+          independently of cloud accounts. Revoke paired phones on the board’s setup page.
+        </p>
+        <p>
+          <WifiOff size={18} /> Nearby readings work while this app is open. History and remote
+          phone notifications need internet. Calibration capture needs the cloud connection.
+        </p>
+      </div>
+    </section>
   );
 }

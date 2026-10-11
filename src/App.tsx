@@ -1,6 +1,9 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { ThemedSelect } from './components/ThemedSelect';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import {
   Activity as ActivityIcon,
+  Bluetooth,
+  UserRound,
   ArrowDownLeft,
   ArrowRight,
   Bell,
@@ -21,7 +24,6 @@ import {
   RefreshCw,
   Settings,
   ShieldCheck,
-  SlidersHorizontal,
   Trash2,
   TriangleAlert,
   Users,
@@ -32,9 +34,8 @@ import {
   WifiOff,
   X,
 } from 'lucide-react';
-import { authConfigured, useSession } from './auth';
+import { useSession } from './auth';
 import { useHousehold } from './useHousehold';
-import { scenarios } from './demo';
 import {
   bandLabels,
   canTestBuzzer,
@@ -42,8 +43,6 @@ import {
   readingCondition,
   type Member,
   type Preferences,
-  type Role,
-  type Scenario,
 } from '../shared/model';
 import { Dialog } from './components/Dialog';
 import { Tank } from './components/Tank';
@@ -52,20 +51,42 @@ import { CalibrationPage } from './components/CalibrationPage';
 import { LevelAlarms } from './components/LevelAlarms';
 import { ProbesPage } from './components/ProbesPage';
 import { usePhoneNotifications } from './notifications';
-import { NearbyBoard } from './components/NearbyBoard';
+import { NearbyBoard, useNearby } from './components/NearbyBoard';
+import { ProfileSheet } from './components/ProfileSheet';
+import { LandingPage } from './components/LandingPage';
+import {
+  freshSource,
+  selectSource,
+  type SourcePreference,
+  type ReadingSource,
+} from '../shared/source';
 import { isNative } from './native';
-import { minimizeApp, useNativeNavigation } from './native';
+import { minimizeApp, useNativeNavigation, useMotionVisibility } from './native';
 
-type Page = 'overview' | 'history' | 'household' | 'settings' | 'calibration' | 'probes';
-type Modal = 'invite' | 'alerts' | 'diagnostics' | 'signin' | 'calibration' | 'remove' | null;
-const pages = [
+type Page =
+  | 'overview'
+  | 'history'
+  | 'alarm'
+  | 'bluetooth'
+  | 'household'
+  | 'settings'
+  | 'calibration'
+  | 'probes';
+type Modal =
+  'profile' | 'invite' | 'alerts' | 'diagnostics' | 'signin' | 'calibration' | 'remove' | null;
+const mainPages = [
   { id: 'overview' as const, name: 'Overview', icon: Gauge },
   { id: 'history' as const, name: 'History', icon: History },
-  { id: 'probes' as const, name: 'Probes', icon: ActivityIcon },
-  { id: 'household' as const, name: 'Household', icon: Users },
+  { id: 'alarm' as const, name: 'Alarm', icon: Bell },
+  { id: 'bluetooth' as const, name: 'Bluetooth', icon: Bluetooth },
+];
+const profilePages = [
   { id: 'settings' as const, name: 'Settings', icon: Settings },
   { id: 'calibration' as const, name: 'Calibration', icon: FlaskConical },
+  { id: 'probes' as const, name: 'Probes', icon: ActivityIcon },
+  { id: 'household' as const, name: 'Household', icon: Users },
 ];
+const pages = [...mainPages, ...profilePages];
 const roleLabels = { viewer: 'Viewer', operator: 'Operator', owner: 'Owner' };
 const roleDescriptions = {
   viewer: 'See readings, history and alerts.',
@@ -99,9 +120,14 @@ function initialInvitation() {
 export default function App() {
   const session = useSession();
   const [invitationToken, setInvitationToken] = useState(initialInvitation);
-  const [preview, setPreview] = useState(() => !authConfigured && !invitationToken);
+  const preview = false;
   const model = useHousehold(preview);
-  const home = model.household;
+  const cloudHome = model.household;
+  const nearby = useNearby();
+  const [sourcePreference, setSourcePreference] = useState<SourcePreference>('auto');
+  const [sourceBusy, setSourceBusy] = useState(false);
+  const [commandSource, setCommandSource] = useState<ReadingSource | null>(null);
+  const sourceInFlight = useRef(false);
   const [page, setPage] = useState<Page>(initialPage);
   const [modal, setModal] = useState<Modal>(null);
   const [toast, setToast] = useState<{ text: string; error: boolean } | null>(null);
@@ -111,16 +137,72 @@ export default function App() {
   const [inviteCreated, setInviteCreated] = useState(false);
   const [range, setRange] = useState<'24h' | '7d'>('24h');
   const [now, setNow] = useState(Date.now);
+  const historyPoints = useMemo(
+    () =>
+      (cloudHome?.history ?? []).filter(
+        (point) => point.at >= Date.now() - (range === '24h' ? 1 : 7) * 86400000,
+      ),
+    [cloudHome?.history, range],
+  );
+  const cloudFresh = freshSource(cloudHome?.reading ?? null, 'cloud', now);
+  const source =
+    commandSource ??
+    (preview
+      ? 'cloud'
+      : selectSource(sourcePreference, cloudHome?.reading ?? null, nearby.reading, now));
+  const activeHome =
+    source === 'bluetooth'
+      ? {
+          ...nearby.localHome,
+          reading: nearby.reading
+            ? { ...nearby.reading, connected: freshSource(nearby.reading, 'bluetooth', now) }
+            : null,
+        }
+      : cloudHome;
+  const home =
+    page === 'bluetooth'
+      ? (activeHome ?? nearby.localHome)
+      : ['overview', 'alarm', 'probes'].includes(page)
+        ? activeHome
+        : cloudHome;
+  const setCloudAvailable = nearby.setCloudAvailable;
+  useEffect(() => {
+    setCloudAvailable(preview || cloudFresh);
+  }, [preview, cloudFresh, setCloudAvailable]);
+  useMotionVisibility(() => setNow(Date.now()));
+  async function sourceAction<T>(action: () => Promise<T>) {
+    if (sourceInFlight.current) throw new Error('Wait for the current board request to finish.');
+    sourceInFlight.current = true;
+    setCommandSource(source);
+    setSourceBusy(true);
+    try {
+      return await action();
+    } finally {
+      sourceInFlight.current = false;
+      setSourceBusy(false);
+      setCommandSource(null);
+    }
+  }
+  const saveAlarms = source === 'bluetooth' ? nearby.save : model.saveAlarms;
+  const acknowledgeLevels = source === 'bluetooth' ? nearby.acknowledge : model.acknowledgeLevels;
+  const buzzer = source === 'bluetooth' ? nearby.control : model.buzzer;
+
   const phoneNotifications = usePhoneNotifications(
     session.authenticated,
     preview,
     model.request,
     () => {
-      navigate('overview');
+      setSourcePreference('cloud');
+      navigate('alarm');
       void model.refresh();
     },
   );
   async function signOut() {
+    if (sourceInFlight.current)
+      throw new Error('Wait for the current board request before signing out.');
+    if (nearby.connected) await nearby.disconnect();
+    setSourcePreference('auto');
+    navigate('overview');
     try {
       await phoneNotifications.disable();
     } finally {
@@ -142,7 +224,6 @@ export default function App() {
     (token) => {
       sessionStorage.setItem('waterline-invite', token);
       setInvitationToken(token);
-      setPreview(false);
     },
   );
   useEffect(() => {
@@ -176,17 +257,17 @@ export default function App() {
       setModal('signin');
       return;
     }
-    setPreview(false);
     void run(session.login);
   }
   const condition = readingCondition(home?.reading ?? null, now);
   const reading = home?.reading;
-  const owner = home ? mayManage(home.role) : false;
+  const owner = cloudHome ? mayManage(cloudHome.role) : false;
   const testAllowed = home
     ? canTestBuzzer(home.role, home.reading, now) &&
       (preview || home.reading?.buzzerControlSupported === true)
     : false;
   const buzzerPending =
+    source === 'cloud' &&
     home?.buzzerCommand &&
     ['queued', 'started'].includes(home.buzzerCommand.status) &&
     home.buzzerCommand.expiresAt > now;
@@ -246,6 +327,41 @@ export default function App() {
     );
   };
 
+  if (
+    !session.authenticated &&
+    !preview &&
+    page !== 'bluetooth' &&
+    !nearby.connected &&
+    !invitationToken
+  ) {
+    return (
+      <>
+        <LandingPage
+          native={isNative}
+          loading={session.loading}
+          error={session.error}
+          signIn={signIn}
+          nearby={() => {
+            setSourcePreference('bluetooth');
+            navigate('bluetooth');
+          }}
+        />
+        {modal === 'signin' ? (
+          <Dialog title="Sign in to Waterline" close={() => setModal(null)}>
+            <p>Sign-in is not configured in this browser build. Use the installed Android app.</p>
+            <button
+              className="button primary"
+              onClick={() => {
+                setModal(null);
+              }}
+            >
+              Close
+            </button>
+          </Dialog>
+        ) : null}
+      </>
+    );
+  }
   return (
     <div className="app-shell">
       <a className="skip-link" href="#main">
@@ -261,7 +377,7 @@ export default function App() {
           }}
         >
           <span className="brand-mark">
-            <Droplet size={24} fill="currentColor" strokeWidth={1.5} />
+            <img src="/waterline-icon.png" alt="" />
           </span>
           <span>
             waterline<span className="brand-dot">.</span>
@@ -278,7 +394,7 @@ export default function App() {
         </div>
         <p className="nav-label">WORKSPACE</p>
         <nav aria-label="Main navigation">
-          {pages.map((item) => (
+          {mainPages.map((item) => (
             <button
               key={item.id}
               className={`nav-item ${page === item.id ? 'active' : ''}`}
@@ -291,6 +407,23 @@ export default function App() {
             </button>
           ))}
         </nav>
+        <button
+          className="profile-trigger"
+          aria-label="Open profile menu"
+          aria-haspopup="dialog"
+          onClick={() => setModal('profile')}
+        >
+          {session.authenticated ? (
+            (session.name || 'You')
+              .split(' ')
+              .map((n) => n[0])
+              .slice(0, 2)
+              .join('')
+              .toUpperCase()
+          ) : (
+            <UserRound size={22} />
+          )}
+        </button>
         <div className="sidebar-bottom">
           <div className="sidebar-note">
             <Waves size={22} />
@@ -322,7 +455,7 @@ export default function App() {
               className="icon-button"
               title={session.authenticated && !preview ? 'Sign out' : 'Sign in'}
               aria-label={session.authenticated && !preview ? 'Sign out' : 'Sign in'}
-              onClick={() => (session.authenticated && !preview ? void run(signOut) : signIn())}
+              onClick={() => setModal('profile')}
             >
               {session.authenticated && !preview ? <LogOut size={17} /> : <LogIn size={17} />}
             </button>
@@ -345,7 +478,7 @@ export default function App() {
             </span>
             <button
               className="icon-button notification-button"
-              onClick={() => setModal('alerts')}
+              onClick={() => navigate('alarm')}
               aria-label={`Alerts${unread ? `, ${unread} unread` : ''}`}
             >
               <Bell size={19} />
@@ -353,67 +486,43 @@ export default function App() {
             </button>
           </div>
         </header>
-        {preview ? (
-          <div className="preview-bar">
-            <div className="preview-heading">
-              <FlaskConical size={15} />
-              <strong>Preview</strong>
-              <span>Sample readings. No device commands.</span>
-            </div>
-            <div className="preview-tools">
-              <label className="sr-only" htmlFor="scenario">
-                Preview scenario
-              </label>
-              <select
-                id="scenario"
-                value={model.scenario}
-                onChange={(event) => model.chooseScenario(event.target.value as Scenario)}
-              >
-                {scenarios.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.label}
-                  </option>
-                ))}
-              </select>
-              <label className="sr-only" htmlFor="preview-role">
-                Preview role
-              </label>
-              <select
-                id="preview-role"
-                value={model.role}
-                onChange={(event) => model.setRole(event.target.value as Role)}
-              >
-                {(['owner', 'operator', 'viewer'] as const).map((role) => (
-                  <option key={role} value={role}>
-                    As {roleLabels[role]}
-                  </option>
-                ))}
-              </select>
-              <button
-                className="icon-button"
-                onClick={model.reset}
-                aria-label="Reset preview"
-                title="Reset preview"
-              >
-                <RefreshCw size={14} />
-              </button>
-              <button className="text-button" onClick={signIn}>
-                Connect your household
-                <ArrowRight size={14} />
-              </button>
-            </div>
-          </div>
-        ) : null}
 
         <main id="main" className="main-content">
-          {isNative && !preview ? (
-            <NearbyBoard
-              cloudAvailable={
-                !!home?.reading?.connected &&
-                home.reading.lastSeen !== null &&
-                now - home.reading.lastSeen < 30000
-              }
-            />
+          {['overview', 'alarm', 'probes'].includes(page) && !preview ? (
+            <section className="source-bar" aria-label="Reading connection">
+              <div>
+                <span
+                  className={`source-dot ${freshSource(activeHome?.reading ?? null, source, now) ? 'fresh' : ''}`}
+                />
+                <strong>
+                  {source === 'bluetooth' ? 'Nearby · Bluetooth' : 'Cloud connection'}
+                </strong>
+                <small>
+                  {freshSource(activeHome?.reading ?? null, source, now)
+                    ? 'Live readings'
+                    : 'Waiting for fresh readings'}
+                </small>
+              </div>
+              <label>
+                <span className="sr-only">Reading and control source</span>
+                <ThemedSelect
+                  label="Reading and control source"
+                  value={sourcePreference}
+                  disabled={sourceBusy || busy || nearby.busy}
+                  onValueChange={(value) => setSourcePreference(value as SourcePreference)}
+                >
+                  <option value="auto">Auto</option>
+                  <option value="cloud">Cloud</option>
+                  <option value="bluetooth">Bluetooth</option>
+                </ThemedSelect>
+              </label>
+              {source === 'bluetooth' && !nearby.connected ? (
+                <button className="text-button" onClick={() => navigate('bluetooth')}>
+                  Connect
+                  <ArrowRight size={15} />
+                </button>
+              ) : null}
+            </section>
           ) : null}
           {invitationToken && !preview ? (
             <section className="join-panel">
@@ -451,6 +560,18 @@ export default function App() {
           ) : null}
           {!home ? (
             <section className="welcome-panel">
+              {page === 'calibration' ? (
+                <p className="inline-note">
+                  Calibration capture needs a signed-in Cloud connection. Bluetooth capture is not
+                  supported. Nearby live readings remain available in Overview.
+                </p>
+              ) : null}
+              {page === 'history' && nearby.connected ? (
+                <p className="inline-note">
+                  Cloud history is unavailable here. Your live Bluetooth readings remain available
+                  in Overview.
+                </p>
+              ) : null}
               <div className="welcome-art">
                 <Droplet size={64} strokeWidth={1} fill="#b4e6cf" />
               </div>
@@ -460,6 +581,12 @@ export default function App() {
                 <br />
                 in balance.
               </h1>
+              {source === 'bluetooth' ? (
+                <button className="button primary" onClick={() => navigate('bluetooth')}>
+                  Connect nearby board
+                  <Bluetooth size={18} />
+                </button>
+              ) : null}
               <p>
                 One place for your tank’s readings, alerts and the people you share your home with.
               </p>
@@ -485,26 +612,12 @@ export default function App() {
                   <button className="text-button" onClick={() => void run(signOut)} disabled={busy}>
                     Sign out
                   </button>
-                  <button className="text-button" onClick={() => setPreview(true)}>
-                    Explore the preview
-                    <ArrowRight size={14} />
-                  </button>
                 </>
               ) : (
                 <>
                   <button className="button primary" onClick={signIn}>
                     Sign in to your household
                     <ArrowRight size={17} />
-                  </button>
-                  <button
-                    className="text-button"
-                    onClick={() => {
-                      setPreview(true);
-                      setInvitationToken('');
-                    }}
-                  >
-                    Explore the preview
-                    <ArrowRight size={14} />
                   </button>
                   {session.error ? <p className="message warning">{session.error}</p> : null}
                 </>
@@ -575,13 +688,13 @@ export default function App() {
                             ) : null}
                           </div>
                         </div>
-                        <Tank band={band} uncertain={uncertain} />
+                        <Tank band={band} uncertain={uncertain} stale={condition === 'offline'} />
                       </div>
                       <div className="probe-strip">
                         {([20, 50, 80, 100] as const).map((level) => {
                           const probe = reading?.probes.find((probe) => probe.level === level);
                           return (
-                            <div key={level}>
+                            <div className={`probe-level-${level}`} key={level}>
                               <span
                                 className={`probe-dot ${probe?.state === 'wet' && !uncertain ? 'wet' : ''}`}
                               />
@@ -604,117 +717,35 @@ export default function App() {
                           : 'A level band, rather than an exact volume measurement.'}
                       </p>
                     </section>
-                    <div className="controls-column">
-                      <section className="panel control-panel">
-                        <div className="panel-heading">
-                          <h2>Local alarm</h2>
-                          <span className="small-icon">
-                            <Volume2 size={19} />
+                    <section className="panel overview-alarm-summary">
+                      <div className="panel-heading">
+                        <h2>Water alarms</h2>
+                        <Bell size={21} />
+                      </div>
+                      <strong>
+                        {home.reading?.levelAlarms?.filter((a) => a.active).length ?? 0} active
+                        alarms
+                      </strong>
+                      <p>
+                        {home.reading?.buzzerEnabled
+                          ? 'Automatic buzzer enabled'
+                          : 'Automatic buzzer disabled'}
+                      </p>
+                      <div className="alarm-mini-levels">
+                        {[20, 50, 80, 100].map((level) => (
+                          <span className={`probe-level-${level}`} key={level}>
+                            {level === 20 ? '<20%' : `${level}%`}
                           </span>
-                        </div>
-                        <div className="alarm-state">
-                          <span
-                            className={`status-pill ${reading?.buzzerEnabled ? 'good' : 'muted'}`}
-                          >
-                            {reading
-                              ? reading.buzzerEnabled
-                                ? 'Enabled'
-                                : 'Disabled'
-                              : 'Not connected'}
-                          </span>
-                          {buzzerTesting ? (
-                            <span className="test-countdown" role="status">
-                              Testing ·{' '}
-                              {Math.max(
-                                0,
-                                Math.ceil(((reading?.buzzerTestingUntil ?? now) - now) / 1000),
-                              )}
-                              s
-                            </span>
-                          ) : null}
-                        </div>
-                        <p>
-                          All automatic alarms use the buzzer settings below. A test sounds for ten
-                          seconds and disables automatic alarms; re-enable them after testing.
-                        </p>
-                        {!preview && home.buzzerCommand ? (
-                          <p role="status">
-                            {home.buzzerCommand.status === 'queued'
-                              ? 'Request queued. Waiting for the board…'
-                              : home.buzzerCommand.status === 'started'
-                                ? 'Board accepted the request…'
-                                : home.buzzerCommand.status === 'complete'
-                                  ? 'Board completed the request.'
-                                  : home.buzzerCommand.status === 'expired'
-                                    ? 'Request expired. Try again when the board is connected.'
-                                    : 'Board could not complete the request. Please retry.'}
-                          </p>
-                        ) : null}
-                        <button
-                          className="button secondary full-width"
-                          disabled={!testAllowed || busy || buzzerTesting || Boolean(buzzerPending)}
-                          onClick={() =>
-                            void run(
-                              () => model.buzzer('test'),
-                              preview
-                                ? 'Ten-second test simulated. Re-enable the alarm after testing.'
-                                : 'Test requested.',
-                            )
-                          }
-                        >
-                          <Volume2 size={16} />
-                          {buzzerTesting ? 'Test in progress' : 'Test buzzer · 10 seconds'}
-                        </button>
-                        <button
-                          className="text-button alarm-toggle"
-                          disabled={!testAllowed || busy || Boolean(buzzerPending)}
-                          onClick={() =>
-                            void run(
-                              () => model.buzzer(reading?.buzzerEnabled ? 'disable' : 'enable'),
-                              preview
-                                ? 'Alarm setting changed in preview.'
-                                : 'Alarm setting requested.',
-                            )
-                          }
-                        >
-                          {reading?.buzzerEnabled ? <VolumeX size={15} /> : <Volume2 size={15} />}{' '}
-                          {reading?.buzzerEnabled ? 'Disable local alarm' : 'Enable local alarm'}
-                        </button>
-                        {home.role === 'viewer' ? (
-                          <small className="permission-note">
-                            Operator or Owner access is needed for controls.
-                          </small>
-                        ) : condition === 'offline' ? (
-                          <small className="permission-note">
-                            Controls are unavailable while the device is offline.
-                          </small>
-                        ) : null}
-                      </section>
-                      <LevelAlarms
-                        home={home}
-                        now={now}
-                        preview={preview}
-                        save={model.saveAlarms}
-                        acknowledge={model.acknowledgeLevels}
-                      />
-                      <section className="panel pump-panel">
-                        <div className="panel-heading">
-                          <h2>Pump control</h2>
-                          <span className="coming-soon">Not connected</span>
-                        </div>
-                        <div className="pump-icon">
-                          <SlidersHorizontal size={23} />
-                        </div>
-                        <p>
-                          Motor control will be available after the starter interface and shutdown
-                          protection are verified.
-                        </p>
-                        <button className="text-button" onClick={() => setModal('diagnostics')}>
-                          View device readiness
-                          <ArrowRight size={14} />
-                        </button>
-                      </section>
-                    </div>
+                        ))}
+                      </div>
+                      <button
+                        className="button secondary full-width"
+                        onClick={() => navigate('alarm')}
+                      >
+                        Open alarms
+                        <ArrowRight size={17} />
+                      </button>
+                    </section>
                   </div>
                   <section className="connection-strip">
                     <div>
@@ -726,14 +757,18 @@ export default function App() {
                           {condition === 'offline'
                             ? 'Device disconnected'
                             : reading
-                              ? 'Home Wi-Fi connection'
+                              ? source === 'bluetooth'
+                                ? 'Nearby Bluetooth connection'
+                                : 'Cloud connection'
                               : 'Device setup pending'}
                         </strong>
                         <small>
                           {preview
                             ? 'Simulated connection'
                             : reading
-                              ? 'Readings received through your cloud backend'
+                              ? source === 'bluetooth'
+                                ? 'Direct from your paired board'
+                                : 'Readings received through your cloud backend'
                               : 'Waiting for the ESP32’s first upload'}
                         </small>
                       </div>
@@ -747,7 +782,9 @@ export default function App() {
                       <strong>
                         {reading
                           ? reading.calibrated
-                            ? 'Sample calibration ready'
+                            ? preview
+                              ? 'Sample calibration ready'
+                              : 'Calibration ready'
                             : 'Not calibrated'
                           : 'Awaiting device'}
                       </strong>
@@ -772,7 +809,7 @@ export default function App() {
                           <ArrowRight size={18} />
                         </button>
                       </div>
-                      <HistoryChart points={home.history} compact />
+                      <HistoryChart points={cloudHome?.history ?? []} compact />
                     </section>
                     <section className="panel activity-panel">
                       <div className="panel-heading">
@@ -804,8 +841,196 @@ export default function App() {
                 </>
               ) : null}
 
+              {page === 'alarm' ? (
+                <>
+                  <div className="page-heading">
+                    <div>
+                      <p className="eyebrow">STAY IN THE KNOW</p>
+                      <h1>Your water alarms.</h1>
+                      <p>Choose when to sound. Quiet them when you’re ready.</p>
+                    </div>
+                  </div>
+                  <LevelAlarms
+                    key={`status-${source}`}
+                    home={home}
+                    now={now}
+                    preview={preview}
+                    externalBusy={sourceBusy || busy || nearby.busy}
+                    transport={source}
+                    save={(rules) => sourceAction(() => saveAlarms(rules))}
+                    acknowledge={(alarms) => sourceAction(() => acknowledgeLevels(alarms))}
+                  />
+                  <section className="panel control-panel">
+                    <div className="panel-heading">
+                      <h2>Local alarm</h2>
+                      <span className="small-icon">
+                        <Volume2 size={19} />
+                      </span>
+                    </div>
+                    <div className="alarm-state">
+                      <span className={`status-pill ${reading?.buzzerEnabled ? 'good' : 'muted'}`}>
+                        {reading
+                          ? reading.buzzerEnabled
+                            ? 'Enabled'
+                            : 'Disabled'
+                          : 'Not connected'}
+                      </span>
+                      {buzzerTesting ? (
+                        <span className="test-countdown" role="status">
+                          Testing ·{' '}
+                          {Math.max(
+                            0,
+                            Math.ceil(((reading?.buzzerTestingUntil ?? now) - now) / 1000),
+                          )}
+                          s
+                        </span>
+                      ) : null}
+                    </div>
+                    <p>
+                      All automatic alarms use the buzzer settings below. A test sounds for ten
+                      seconds and disables automatic alarms; re-enable them after testing.
+                    </p>
+                    {!preview && source === 'cloud' && home.buzzerCommand ? (
+                      <p role="status">
+                        {home.buzzerCommand.status === 'queued'
+                          ? 'Request queued. Waiting for the board…'
+                          : home.buzzerCommand.status === 'started'
+                            ? 'Board accepted the request…'
+                            : home.buzzerCommand.status === 'complete'
+                              ? 'Board completed the request.'
+                              : home.buzzerCommand.status === 'expired'
+                                ? 'Request expired. Try again when the board is connected.'
+                                : 'Board could not complete the request. Please retry.'}
+                      </p>
+                    ) : null}
+                    <button
+                      className="button secondary full-width"
+                      disabled={
+                        !testAllowed ||
+                        busy ||
+                        sourceBusy ||
+                        nearby.busy ||
+                        buzzerTesting ||
+                        Boolean(buzzerPending)
+                      }
+                      onClick={() =>
+                        void run(
+                          () => sourceAction(() => buzzer('test')),
+                          preview
+                            ? 'Ten-second test simulated. Re-enable the alarm after testing.'
+                            : 'Test requested.',
+                        )
+                      }
+                    >
+                      <Volume2 size={16} />
+                      {buzzerTesting ? 'Test in progress' : 'Test buzzer · 10 seconds'}
+                    </button>
+                    <button
+                      className="text-button alarm-toggle"
+                      disabled={
+                        !testAllowed || busy || sourceBusy || nearby.busy || Boolean(buzzerPending)
+                      }
+                      onClick={() =>
+                        void run(
+                          () =>
+                            sourceAction(() =>
+                              buzzer(reading?.buzzerEnabled ? 'disable' : 'enable'),
+                            ),
+                          preview
+                            ? 'Alarm setting changed in preview.'
+                            : 'Alarm setting requested.',
+                        )
+                      }
+                    >
+                      {reading?.buzzerEnabled ? <VolumeX size={15} /> : <Volume2 size={15} />}{' '}
+                      {reading?.buzzerEnabled ? 'Disable local alarm' : 'Enable local alarm'}
+                    </button>
+                    {home.role === 'viewer' ? (
+                      <small className="permission-note">
+                        Operator or Owner access is needed for controls.
+                      </small>
+                    ) : condition === 'offline' ? (
+                      <small className="permission-note">
+                        Controls are unavailable while the device is offline.
+                      </small>
+                    ) : null}
+                  </section>
+
+                  <LevelAlarms
+                    key={`edit-${source}-${home.id}-${home.alarmSettings?.revision ?? 0}`}
+                    home={home}
+                    now={now}
+                    preview={preview}
+                    edit
+                    externalBusy={sourceBusy || busy || nearby.busy}
+                    transport={source}
+                    save={(rules) => sourceAction(() => saveAlarms(rules))}
+                    acknowledge={(alarms) => sourceAction(() => acknowledgeLevels(alarms))}
+                  />
+                  <section className="panel calibration-panel">
+                    <h2>Phone alarm notifications</h2>
+                    <p>
+                      Receive a sound notification for each new below-20%, 50%, 80% or 100% buzzer
+                      alarm. Tap it to open Waterline. Acknowledged alarms do not send another alert
+                      until re-armed.
+                    </p>
+                    <p role="status">
+                      {phoneNotifications.supported
+                        ? phoneNotifications.status
+                        : 'Available in the signed-in Android app.'}
+                    </p>
+                    <button
+                      type="button"
+                      className="button secondary"
+                      disabled={!phoneNotifications.supported || busy}
+                      onClick={() =>
+                        phoneNotifications.enabled
+                          ? void run(phoneNotifications.disable)
+                          : phoneNotifications.enable()
+                      }
+                    >
+                      {phoneNotifications.enabled
+                        ? 'Disable phone notifications'
+                        : 'Enable phone notifications'}
+                    </button>
+                    <p>
+                      Sound follows Android notification volume and Do Not Disturb. Delivery needs
+                      internet and may be delayed. The board buzzer continues independently.
+                    </p>
+                  </section>
+
+                  {source === 'cloud' && home.alerts.length ? (
+                    <section className="panel cloud-alert-list">
+                      <h2>Household alerts</h2>
+                      {home.alerts.map((a) => (
+                        <article className="alert-item" key={a.id}>
+                          <div>
+                            <strong>{a.title}</strong>
+                            <p>{a.detail}</p>
+                            <small>
+                              {age(a.at)} ·{' '}
+                              {a.acknowledged ? 'Acknowledged' : 'Reported by the board'}
+                            </small>
+                          </div>
+                        </article>
+                      ))}
+                    </section>
+                  ) : null}
+                  {source === 'bluetooth' ? (
+                    <p className="inline-note">
+                      Bluetooth changes are saved directly on your paired board. Phone notifications
+                      still need a signed-in account and internet.
+                    </p>
+                  ) : null}
+                </>
+              ) : null}
+              {page === 'bluetooth' ? <NearbyBoard /> : null}
+
               {page === 'history' ? (
                 <>
+                  <p className="inline-note">
+                    Cloud history · Bluetooth readings are live and are not added to this chart.
+                  </p>
                   <div className="page-heading">
                     <div>
                       <p className="eyebrow">A LITTLE PERSPECTIVE</p>
@@ -837,11 +1062,7 @@ export default function App() {
                         {preview ? ' · sample history' : ''}
                       </span>
                     </div>
-                    <HistoryChart
-                      points={home.history.filter(
-                        (point) => point.at >= Date.now() - (range === '24h' ? 1 : 7) * 86400000,
-                      )}
-                    />
+                    <HistoryChart key={range} points={historyPoints} />
                     <p className="tank-footnote">
                       <Info size={14} />
                       Offline and uncertain readings appear as gaps. This chart does not measure
@@ -928,24 +1149,22 @@ export default function App() {
                             <label className="sr-only" htmlFor={`role-${member.id}`}>
                               Access for {member.name}
                             </label>
-                            <select
+                            <ThemedSelect
                               id={`role-${member.id}`}
                               disabled={busy}
+                              label={'Access for ' + member.name}
                               value={member.role}
-                              onChange={(event) =>
+                              onValueChange={(value) =>
                                 void run(
                                   () =>
-                                    model.changeMember(
-                                      member.id,
-                                      event.target.value as 'viewer' | 'operator',
-                                    ),
+                                    model.changeMember(member.id, value as 'viewer' | 'operator'),
                                   'Access updated.',
                                 )
                               }
                             >
                               <option value="viewer">Viewer</option>
                               <option value="operator">Operator</option>
-                            </select>
+                            </ThemedSelect>
                             <button
                               className="icon-button"
                               onClick={() => {
@@ -1027,18 +1246,35 @@ export default function App() {
                 <ProbesPage reading={home.reading} now={now} preview={preview} />
               ) : null}
               {page === 'calibration' && home ? (
-                <CalibrationPage
-                  home={home}
-                  now={now}
-                  preview={preview}
-                  capture={async (mode) => {
-                    await model.request('/api/calibration', 'POST', { mode, prepared: true });
-                    await model.refresh();
-                  }}
-                />
+                <>
+                  <div className="page-heading">
+                    <div>
+                      <p className="eyebrow">SET UP YOUR PROBES</p>
+                      <h1>Calibration.</h1>
+                      <p>Capture dry and wet readings with your cloud-connected board.</p>
+                    </div>
+                  </div>
+                  <p className="inline-note">
+                    Calibration capture uses Cloud. Bluetooth capture is not supported; reconnect
+                    the board to Wi-Fi to begin.
+                  </p>
+                  <CalibrationPage
+                    home={home}
+                    now={now}
+                    preview={preview}
+                    capture={async (mode) => {
+                      await model.request('/api/calibration', 'POST', { mode, prepared: true });
+                      await model.refresh();
+                    }}
+                  />
+                </>
               ) : null}
               {page === 'settings' ? (
                 <>
+                  <section className="panel app-info">
+                    <h2>Waterline 0.2.2</h2>
+                    <p>Your household’s tank, connected through Cloud or nearby Bluetooth.</p>
+                  </section>
                   <div className="page-heading">
                     <div>
                       <p className="eyebrow">MAKE IT YOURS</p>
@@ -1082,7 +1318,7 @@ export default function App() {
                             key: 'full',
                             label: 'Tank full',
                             detail:
-                              'Water reaches the 100% electrode. Configure its buzzer separately below.',
+                              'Water reaches the 100% electrode. Configure its buzzer in the Alarm tab.',
                           },
                           {
                             key: 'fault',
@@ -1114,7 +1350,7 @@ export default function App() {
                         <Bell size={17} />
                         <p>
                           These preferences apply to in-app alerts. Phone sound notifications follow
-                          the board’s enabled buzzer alarms and are controlled separately below.
+                          the board’s enabled buzzer alarms and are controlled in the Alarm tab.
                         </p>
                       </div>
                     </section>
@@ -1130,46 +1366,6 @@ export default function App() {
                       </button>
                     </div>
                   </form>
-                  <section className="panel calibration-panel">
-                    <h2>Phone alarm notifications</h2>
-                    <p>
-                      Receive a sound notification for each new below-20%, 50%, 80% or 100% buzzer
-                      alarm. Tap it to open Waterline. Acknowledged alarms do not send another alert
-                      until re-armed.
-                    </p>
-                    <p role="status">
-                      {phoneNotifications.supported
-                        ? phoneNotifications.status
-                        : 'Available in the signed-in Android app.'}
-                    </p>
-                    <button
-                      type="button"
-                      className="button secondary"
-                      disabled={!phoneNotifications.supported || busy}
-                      onClick={() =>
-                        phoneNotifications.enabled
-                          ? void run(phoneNotifications.disable)
-                          : phoneNotifications.enable()
-                      }
-                    >
-                      {phoneNotifications.enabled
-                        ? 'Disable phone notifications'
-                        : 'Enable phone notifications'}
-                    </button>
-                    <p>
-                      Sound follows Android notification volume and Do Not Disturb. Delivery needs
-                      internet and may be delayed. The board buzzer continues independently.
-                    </p>
-                  </section>
-                  <LevelAlarms
-                    key={`alarm-settings-${home.alarmSettings?.revision ?? 0}`}
-                    home={home}
-                    now={now}
-                    preview={preview}
-                    edit
-                    save={model.saveAlarms}
-                    acknowledge={model.acknowledgeLevels}
-                  />
                   <section className="panel calibration-panel">
                     <div>
                       <h2>Probe calibration</h2>
@@ -1200,6 +1396,72 @@ export default function App() {
         </main>
       </div>
 
+      {modal === 'profile' ? (
+        <ProfileSheet close={() => setModal(null)}>
+          <div className="sheet-account">
+            <span className="avatar">
+              {session.authenticated ? (
+                (session.name || 'You')
+                  .split(' ')
+                  .map((n) => n[0])
+                  .slice(0, 2)
+                  .join('')
+                  .toUpperCase()
+              ) : (
+                <UserRound size={25} />
+              )}
+            </span>
+            <div>
+              <strong>{preview ? 'Preview household' : session.name || 'Your account'}</strong>
+              <small>
+                {session.email || (nearby.connected ? 'Paired Bluetooth access' : 'Not signed in')}
+              </small>
+              <small>
+                {cloudHome ? roleLabels[cloudHome.role] : 'Nearby controls use board pairing'}
+              </small>
+            </div>
+          </div>
+          <nav className="sheet-menu" aria-label="Profile navigation">
+            {profilePages.map((item) => (
+              <button
+                key={item.id}
+                onClick={() => {
+                  setModal(null);
+                  navigate(item.id);
+                }}
+              >
+                <span className={`menu-icon menu-${item.id}`}>
+                  <item.icon size={21} />
+                </span>
+                <span>{item.name}</span>
+                <ArrowRight size={17} />
+              </button>
+            ))}
+            <button onClick={() => setModal('diagnostics')}>
+              <span className="menu-icon">
+                <CircleHelp size={21} />
+              </span>
+              <span>Device & connection</span>
+              <ArrowRight size={17} />
+            </button>
+            <button
+              onClick={() => {
+                setModal(null);
+                if (session.authenticated && !preview) void run(signOut);
+                else {
+                  signIn();
+                }
+              }}
+            >
+              <span className="menu-icon">
+                {session.authenticated && !preview ? <LogOut size={21} /> : <LogIn size={21} />}
+              </span>
+              <span>{session.authenticated && !preview ? 'Sign out' : 'Sign in'}</span>
+              <ArrowRight size={17} />
+            </button>
+          </nav>
+        </ProfileSheet>
+      ) : null}
       {toast ? (
         <div
           className={`toast ${toast.error ? 'error' : ''}`}
@@ -1225,17 +1487,14 @@ export default function App() {
             Sign-in will be available once Auth0 is configured. Every family member will have their
             own account.
           </p>
-          <p className="inline-note">
-            For now, explore the preview. Sample readings and controls do not affect your ESP32.
-          </p>
+          <p className="inline-note">Use the installed Android app to access your household.</p>
           <button
             className="button primary full-width"
             onClick={() => {
               setModal(null);
-              setPreview(true);
             }}
           >
-            Continue in preview
+            Close
             <ArrowRight size={16} />
           </button>
         </Dialog>
@@ -1342,10 +1601,15 @@ export default function App() {
                 autoFocus
               />
               <label htmlFor="invite-role">Household access</label>
-              <select id="invite-role" name="role" defaultValue="viewer">
+              <ThemedSelect
+                label="Household access"
+                id="invite-role"
+                name="role"
+                defaultValue="viewer"
+              >
                 <option value="viewer">Viewer — readings and alerts</option>
                 <option value="operator">Operator — readings and device controls</option>
-              </select>
+              </ThemedSelect>
               <p className="dialog-footnote">
                 {preview
                   ? 'Preview only. No invitation email will be sent.'
@@ -1404,7 +1668,13 @@ export default function App() {
             </div>
             <div>
               <dt>Calibration</dt>
-              <dd>{reading?.calibrated ? 'Sample calibration ready' : 'Not confirmed'}</dd>
+              <dd>
+                {reading?.calibrated
+                  ? preview
+                    ? 'Sample calibration ready'
+                    : 'Calibration ready'
+                  : 'Not confirmed'}
+              </dd>
             </div>
             <div>
               <dt>Motor feedback</dt>
@@ -1437,7 +1707,7 @@ export default function App() {
           <p className="inline-note">
             {preview
               ? 'These values are sample data. The app is not reading your physical ESP32.'
-              : 'Cloud device pairing is not available in this first release. Use your existing local device page for setup and recovery.'}
+              : 'Use Cloud for remote readings or Bluetooth for nearby access. Board Wi-Fi and pairing recovery use its local setup page.'}
           </p>
         </Dialog>
       ) : null}
@@ -1464,8 +1734,8 @@ export default function App() {
             </li>
           </ol>
           <p className="inline-note">
-            Cloud calibration commands are not connected yet. Use the ESP32’s existing local
-            calibration page. Each capture takes up to 25 seconds.
+            Open Calibration from your profile to capture readings. Each 20-cycle capture takes
+            about 100 seconds after delivery.
           </p>
           <button className="button secondary full-width" onClick={() => setModal(null)}>
             Got it
@@ -1475,3 +1745,4 @@ export default function App() {
     </div>
   );
 }
+
