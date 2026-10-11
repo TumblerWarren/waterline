@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Waterline</string>
+    <string name="title_activity_main">Waterline</string>
+    <string name="package_name">com.waterline.household</string>
+    <string name="custom_url_scheme">com.waterline.household</string>
+</resources>

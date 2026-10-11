@@ -1,0 +1,61 @@
+{
+  "name": "waterline",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "engines": {
+    "node": "24.x"
+  },
+  "overrides": {
+    "xcode": {
+      "uuid": "^11.1.1"
+    }
+  },
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "test": "vitest run",
+    "typecheck": "tsc -b",
+    "cf:types": "wrangler types --config wrangler.jsonc --config wrangler.backend.jsonc",
+    "backend:check": "node scripts/check-backend-deployment.mjs && tsc -b && wrangler deploy --config wrangler.backend.jsonc --dry-run",
+    "backend:deploy": "npm run backend:check && wrangler deploy --config wrangler.backend.jsonc",
+    "db:migrate:remote": "wrangler d1 migrations apply waterline --config wrangler.backend.jsonc --remote",
+    "db:migrate:local": "wrangler d1 migrations apply waterline --local",
+    "deploy:check": "wrangler deploy --dry-run",
+    "deploy": "node scripts/check-deployment.mjs && npm run build && wrangler deploy",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "build:android": "node scripts/configure-android-auth.mjs && tsc -b && vite build --mode android",
+    "android:sync": "npm run build:android && cap sync android",
+    "android:open": "cap open android",
+    "android:run": "cap run android"
+  },
+  "dependencies": {
+    "@auth0/auth0-react": "^2.28.2",
+    "@capacitor/android": "^8.5.3",
+    "@capacitor/app": "^8.1.2",
+    "@capacitor/browser": "^8.0.5",
+    "@capacitor/core": "^8.5.3",
+    "@capacitor/keyboard": "^8.0.6",
+    "@capacitor/status-bar": "^8.0.4",
+    "jose": "^6.2.12",
+    "lucide-react": "^1.55.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.5.3",
+    "@cloudflare/vite-plugin": "^1.63.1",
+    "@types/node": "^26.6.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "jsonc-parser": "^3.3.1",
+    "prettier": "^3.9.10",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4",
+    "vitest": "^5.0.3",
+    "wrangler": "^4.149.0"
+  }
+}

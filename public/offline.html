@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <meta charset="utf-8" /><meta
+    name="viewport"
+    content="width=device-width,initial-scale=1"
+  /><title>Waterline · Offline</title
+  ><style>
+    body {
+      font: 16px/1.6 system-ui;
+      background: #f6f7f4;
+      color: #173c41;
+      margin: 0;
+      display: grid;
+      place-items: center;
+      min-height: 100vh;
+    }
+    main {
+      max-width: 420px;
+      padding: 36px;
+    }
+    h1 {
+      font-size: 32px;
+    }
+    button {
+      background: #173c41;
+      color: white;
+      border: 0;
+      border-radius: 10px;
+      padding: 14px 24px;
+      font: inherit;
+      cursor: pointer;
+    }
+  </style>
+  <main>
+    <p>WATERLINE</p>
+    <h1>You’re offline.</h1>
+    <p>
+      We can’t check the tank or send controls right now. Reconnect to see fresh readings. Local
+      device alarms continue according to the device’s settings.
+    </p>
+    <button onclick="location.reload()">Try again</button>
+  </main>
+</html>

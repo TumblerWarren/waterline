@@ -1,0 +1,28 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "waterline-api",
+  "account_id": "646e4df5c531df875cd4c2d9c2c90ca7",
+  "main": "worker/backend.ts",
+  "compatibility_date": "2026-10-11",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "preview_urls": false,
+  "routes": [{ "pattern": "waterline.devbuildtool.com", "custom_domain": true }],
+  "vars": {
+    "AUTH0_DOMAIN": "auth.devbuildtool.com",
+    "AUTH0_AUDIENCE": "https://waterline.devbuildtool.com/api",
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "waterline",
+      "database_id": "3fd3d55d-31f0-4bf9-af07-330d047e15d3",
+      "migrations_dir": "migrations",
+    },
+  ],
+  "observability": {
+    "enabled": true,
+    "logs": { "enabled": true, "head_sampling_rate": 1 },
+    "traces": { "enabled": true, "head_sampling_rate": 0.01 },
+  },
+}
