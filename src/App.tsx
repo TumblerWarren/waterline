@@ -51,6 +51,9 @@ import { HistoryChart } from './components/HistoryChart';
 import { CalibrationPage } from './components/CalibrationPage';
 import { LevelAlarms } from './components/LevelAlarms';
 import { ProbesPage } from './components/ProbesPage';
+import { usePhoneNotifications } from './notifications';
+import { NearbyBoard } from './components/NearbyBoard';
+import { isNative } from './native';
 import { minimizeApp, useNativeNavigation } from './native';
 
 type Page = 'overview' | 'history' | 'household' | 'settings' | 'calibration' | 'probes';
@@ -108,6 +111,22 @@ export default function App() {
   const [inviteCreated, setInviteCreated] = useState(false);
   const [range, setRange] = useState<'24h' | '7d'>('24h');
   const [now, setNow] = useState(Date.now);
+  const phoneNotifications = usePhoneNotifications(
+    session.authenticated,
+    preview,
+    model.request,
+    () => {
+      navigate('overview');
+      void model.refresh();
+    },
+  );
+  async function signOut() {
+    try {
+      await phoneNotifications.disable();
+    } finally {
+      await session.logout();
+    }
+  }
   useEffect(() => {
     const timer = window.setInterval(() => {
       if (document.visibilityState === 'visible') setNow(Date.now());
@@ -303,9 +322,7 @@ export default function App() {
               className="icon-button"
               title={session.authenticated && !preview ? 'Sign out' : 'Sign in'}
               aria-label={session.authenticated && !preview ? 'Sign out' : 'Sign in'}
-              onClick={() =>
-                session.authenticated && !preview ? void run(session.logout) : signIn()
-              }
+              onClick={() => (session.authenticated && !preview ? void run(signOut) : signIn())}
             >
               {session.authenticated && !preview ? <LogOut size={17} /> : <LogIn size={17} />}
             </button>
@@ -389,6 +406,15 @@ export default function App() {
         ) : null}
 
         <main id="main" className="main-content">
+          {isNative && !preview ? (
+            <NearbyBoard
+              cloudAvailable={
+                !!home?.reading?.connected &&
+                home.reading.lastSeen !== null &&
+                now - home.reading.lastSeen < 30000
+              }
+            />
+          ) : null}
           {invitationToken && !preview ? (
             <section className="join-panel">
               <Users size={28} />
@@ -456,11 +482,7 @@ export default function App() {
                     Try again
                     <RefreshCw size={15} />
                   </button>
-                  <button
-                    className="text-button"
-                    onClick={() => void run(session.logout)}
-                    disabled={busy}
-                  >
+                  <button className="text-button" onClick={() => void run(signOut)} disabled={busy}>
                     Sign out
                   </button>
                   <button className="text-button" onClick={() => setPreview(true)}>
@@ -1091,8 +1113,8 @@ export default function App() {
                       <div className="inline-note">
                         <Bell size={17} />
                         <p>
-                          Phone push notifications aren’t connected yet. These settings apply to
-                          in-app alerts.
+                          These preferences apply to in-app alerts. Phone sound notifications follow
+                          the board’s enabled buzzer alarms and are controlled separately below.
                         </p>
                       </div>
                     </section>
@@ -1108,6 +1130,37 @@ export default function App() {
                       </button>
                     </div>
                   </form>
+                  <section className="panel calibration-panel">
+                    <h2>Phone alarm notifications</h2>
+                    <p>
+                      Receive a sound notification for each new below-20%, 50%, 80% or 100% buzzer
+                      alarm. Tap it to open Waterline. Acknowledged alarms do not send another alert
+                      until re-armed.
+                    </p>
+                    <p role="status">
+                      {phoneNotifications.supported
+                        ? phoneNotifications.status
+                        : 'Available in the signed-in Android app.'}
+                    </p>
+                    <button
+                      type="button"
+                      className="button secondary"
+                      disabled={!phoneNotifications.supported || busy}
+                      onClick={() =>
+                        phoneNotifications.enabled
+                          ? void run(phoneNotifications.disable)
+                          : phoneNotifications.enable()
+                      }
+                    >
+                      {phoneNotifications.enabled
+                        ? 'Disable phone notifications'
+                        : 'Enable phone notifications'}
+                    </button>
+                    <p>
+                      Sound follows Android notification volume and Do Not Disturb. Delivery needs
+                      internet and may be delayed. The board buzzer continues independently.
+                    </p>
+                  </section>
                   <LevelAlarms
                     key={`alarm-settings-${home.alarmSettings?.revision ?? 0}`}
                     home={home}

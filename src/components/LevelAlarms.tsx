@@ -16,6 +16,7 @@ export function LevelAlarms({
   edit = false,
   save,
   acknowledge,
+  transport = 'cloud',
 }: {
   home: Household;
   now: number;
@@ -23,6 +24,7 @@ export function LevelAlarms({
   edit?: boolean;
   save: (rules: AlarmRule[]) => Promise<void>;
   acknowledge: (alarms: LevelAlarm[]) => Promise<void>;
+  transport?: 'cloud' | 'bluetooth';
 }) {
   const [rules, setRules] = useState(() => home.alarmSettings?.rules ?? defaultAlarmRules());
   const [busy, setBusy] = useState(false),
@@ -69,7 +71,11 @@ export function LevelAlarms({
     event.preventDefault();
     void perform(
       () => save(rules),
-      preview ? 'Saved in preview.' : 'Settings saved in cloud. Waiting for the board to confirm.',
+      preview
+        ? 'Saved in preview.'
+        : transport === 'bluetooth'
+          ? 'Board confirmed and saved these settings.'
+          : 'Settings saved in cloud. Waiting for the board to confirm.',
     );
   }
   return (

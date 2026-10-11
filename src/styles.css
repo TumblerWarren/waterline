@@ -2027,6 +2027,25 @@ select:disabled {
   font-weight: 600;
   color: var(--green);
 }
+.nearby-panel {
+  margin-bottom: 24px;
+}
+.nearby-panel summary {
+  cursor: pointer;
+  color: var(--green);
+}
+.nearby-panel .probe-workspace {
+  margin-top: 24px;
+}
+.nearby-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 20px 0;
+}
+.nearby-panel .level-alarm-panel {
+  margin-top: 24px;
+}
 .probe-values {
   margin: 20px 0;
 }

@@ -4,11 +4,11 @@ Android is the primary platform. Capacitor bundles Waterline's interface locally
 
 ## Updated test build
 
-Version 0.1.12 uses `https://waterline.devbuildtool.com` and automatically refreshes real cloud readings while the app is visible. Native Auth0 sign-in and encrypted sessions remain configured. Your account is provisioned as household Owner. Preview remains available with clearly labeled sample readings. See [BACKEND.md](BACKEND.md) for device telemetry and cloud deployment.
+Version 0.1.14 uses `https://waterline.devbuildtool.com` and automatically refreshes real cloud readings while the app is visible. Native Auth0 sign-in and encrypted sessions remain configured. Your account is provisioned as household Owner. Preview remains available with clearly labeled sample readings. See [BACKEND.md](BACKEND.md) for device telemetry and cloud deployment.
 
 The Calibration page guides four-probe DRY/WET captures, shows cloud command delivery and live per-probe calibration values and capture variation, with progress out of 20 cycles, and requires physical-preparation confirmation. Only the household Owner can request captures.
 
-Updated APK: `releases/waterline-0.1.12-probes.apk`. This is a debug build for testing, not a Play Store release. Installation is performed only for the user's requested connected phone. See [VERIFICATION.md](VERIFICATION.md) for checks and limitations.
+Updated APK: `releases/waterline-0.1.14-bluetooth.apk`. This is a debug build for testing, not a Play Store release. Installation is performed only for the user's requested connected phone. See [VERIFICATION.md](VERIFICATION.md) for checks and limitations.
 
 Requirements: Node 24, JDK 21 and Android SDK 36. Minimum Android version is 7 / API 24. This machine uses SDK `E:\Program\android_sdk` and JDK `C:\Users\sdsan\.jdks\openjdk-21.0.2`.
 
@@ -78,3 +78,9 @@ Android invitations use `com.waterline.household://join?token=…`. They require
 Official references: [Auth0 Android SDK](https://github.com/auth0/Auth0.Android), [Android quickstart](https://auth0.com/docs/quickstart/native/android), [API access policies](https://auth0.com/blog/developers-guide-api-access-policies-auth0/), [Capacitor Android environment](https://capacitorjs.com/docs/getting-started/environment-setup).
 
 The Probes tab shows each level electrode raw ADC, filtered median, water contact, saved DRY/WET calibration, separation and capture spread. It uses existing schema-3 board telemetry; no board update is needed. Old samples without raw ADC display Not supplied. Stale contact is explicitly labeled.
+
+Phone alarm notifications are installed and the cloud sender is configured. A real test appeared and sounded on the registered phone; see NOTIFICATIONS.md.
+
+
+Nearby Bluetooth readings and controls are installed in version 0.1.14. Pairing is separate from cloud accounts; see BLUETOOTH.md for offline setup and revocation.
+

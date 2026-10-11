@@ -71,6 +71,17 @@ export async function readAlarmSettings(env: ApiEnv, deviceId: string) {
   const row = await env.DB.prepare('SELECT revision,rules FROM alarm_settings WHERE device_id=?')
     .bind(deviceId)
     .first<{ revision: number; rules: string }>();
+  const device = await env.DB.prepare('SELECT latest FROM devices WHERE id=?')
+    .bind(deviceId)
+    .first<{ latest: string | null }>();
+  const reported = device?.latest ? (JSON.parse(device.latest) as Reading) : null;
+  // Local Bluetooth edits are authoritative once a newer board revision uploads.
+  if (
+    reported?.levelAlarms?.length === 4 &&
+    reported.alarmRevision !== undefined &&
+    reported.alarmRevision > (row?.revision ?? 0)
+  )
+    return { revision: reported.alarmRevision, rules: validateRules(reported.levelAlarms) };
   return row
     ? { revision: row.revision, rules: validateRules(JSON.parse(row.rules)) }
     : { revision: 0, rules: defaultAlarmRules() };
@@ -92,10 +103,14 @@ export async function saveAlarmSettings(
   const rules = validateRules(data.rules);
   const device = await deviceFor(env, householdId);
   await env.DB.prepare(
-    `INSERT INTO alarm_settings(device_id,revision,rules) VALUES(?,1,?)
-    ON CONFLICT(device_id) DO UPDATE SET revision=alarm_settings.revision+1,rules=excluded.rules`,
+    `INSERT INTO alarm_settings(device_id,revision,rules) VALUES(?,?,?)
+    ON CONFLICT(device_id) DO UPDATE SET revision=MAX(alarm_settings.revision,excluded.revision-1)+1,rules=excluded.rules`,
   )
-    .bind(device.id, JSON.stringify(rules))
+    .bind(
+      device.id,
+      ((device.latest ? (JSON.parse(device.latest) as Reading).alarmRevision : 0) ?? 0) + 1,
+      JSON.stringify(rules),
+    )
     .run();
 }
 export async function acknowledgeAlarms(

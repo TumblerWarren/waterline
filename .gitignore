@@ -12,4 +12,6 @@ dist/
 test-results/
 coverage/
 releases/*.apk
+android/app/google-services.json
+private/
 android/app/src/main/res/values/auth0.xml

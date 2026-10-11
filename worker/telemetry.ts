@@ -4,6 +4,7 @@ import type { Band, Reading, Probe } from '../shared/model';
 import { calibrationReply, latestCalibration } from './calibration';
 import { buzzerReply, latestBuzzer } from './buzzer';
 import { alarmTelemetry, alarmReply, readAlarmSettings, alarmAcknowledgements } from './alarms';
+import { queueAlarmPush, deliverPush } from './push';
 
 export async function tokenHash(token: string) {
   return Array.from(
@@ -176,6 +177,7 @@ export async function ingestTelemetry(
   request: Request,
   env: ApiEnv,
   readBody: (request: Request) => Promise<Record<string, unknown>>,
+  ctx?: Pick<ExecutionContext, 'waitUntil'>,
 ) {
   // Opaque device credentials grant upload access only. Auth0 user tokens cannot upload.
   const token = request.headers.get('Authorization')?.match(/^Bearer (wl_[a-f0-9]{64})$/)?.[1];
@@ -218,6 +220,11 @@ export async function ingestTelemetry(
   const command = await calibrationReply(env, device.id, data, reading, now);
   const buzzer = await buzzerReply(env, device.id, data, reading, now);
   const alarmHeaders = await alarmReply(env, device.id, reading, now);
+  await queueAlarmPush(env, device.id, reading, now);
+  if (typeof ctx?.waitUntil === 'function')
+    ctx.waitUntil(
+      deliverPush(env).catch(() => console.error(JSON.stringify({ event: 'push_worker_failed' }))),
+    );
   return Response.json(
     { ok: true },
     {

@@ -1,3 +1,14 @@
+# Nearby Bluetooth - version 0.1.14, 11 October 2026
+
+- BLE readings and controls added with passkey pairing and encrypted GATT access. Dedicated offline panel, five-second live refresh and reconnect to a previously paired board when cloud data is unavailable.
+- 117 tests, TypeScript, Android build/lint and APK signature pass; app installed. Backend 692f45a6-ca2c-4e21-8020-4f7dc9bea8c8 deployed with newer-board alarm revision reconciliation. Firmware compiles within the existing partition and was USB-flashed with verified hash. Running v12 status and retained calibration checked; cloud uploads HTTP 200. User confirmed passkey pairing and live Bluetooth readings. User confirmed readings continue updating and the buzzer test works with phone Wi-Fi and mobile data off, Bluetooth on. Board-router loss and physical acknowledgement/settings-save tests were not separately exercised. See BLUETOOTH.md.
+
+# Android alarm notifications - version 0.1.13, 11 October 2026
+
+- Notification-ready backend deployed (8aa39577-beb9-4f74-bb5f-656575afb6b3), migration 0007 applied, signed debug APK installed. Android permission granted and user reports Phone registered.
+- All 111 tests, TypeScript, Android build/lint and APK signature checks pass. Settings checked at phone width with no horizontal overflow. Firebase Waterline app registered separately in the existing project; no board change.
+- Sender provisioning explicitly approved and completed: dedicated waterline-push identity, custom role with only cloudmessaging.messages.create, FCM enabled and Worker secret uploaded. Real FCM HTTP 200 test delivered to the registered phone; user confirmed appearance and sound. Fresh physical probe alarm integration remains to observe; no alarm jobs were queued during verification. See NOTIFICATIONS.md for delivery limitations.
+
 # Individual Probes page - version 0.1.12, 11 October 2026
 
 - Added a separate Probes tab for all four electrodes: raw ADC, filtered median, contact state, calibration captures, wet-minus-dry gap and capture spreads. Stale contact is labeled; preview uses Sample readings. Phone navigation fits six tabs at 390px with no horizontal overflow; card padding visually checked.
@@ -159,3 +170,8 @@ Sample data and simulated buzzer actions are explicitly labeled in preview mode.
 APK: `releases/waterline-0.1.0-preview.apk`
 
 SHA-256: `E3978D7647F82BD17F902BDE5E828DAF69C8D5C6D4532FD8E0DB11A8174023BE`
+
+
+
+
+

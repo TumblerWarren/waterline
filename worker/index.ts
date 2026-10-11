@@ -6,7 +6,10 @@ import { ingestTelemetry, householdTelemetry } from './telemetry';
 import { queueCalibration } from './calibration';
 import { queueBuzzer } from './buzzer';
 import { saveAlarmSettings, acknowledgeAlarms } from './alarms';
-export type ApiEnv = Pick<Env, 'DB' | 'AUTH0_DOMAIN' | 'AUTH0_AUDIENCE'>;
+import { registerPush, disablePush, pushConfigured } from './push';
+export type ApiEnv = Pick<Env, 'DB' | 'AUTH0_DOMAIN' | 'AUTH0_AUDIENCE'> & {
+  FCM_SERVICE_ACCOUNT?: string;
+};
 
 interface Membership {
   id: string;
@@ -175,7 +178,11 @@ async function acceptInvitation(request: Request, env: ApiEnv, identity: Identit
   return response({ ok: true });
 }
 export const api = {
-  async fetch(request, env): Promise<Response> {
+  async fetch(
+    request: Request,
+    env: ApiEnv,
+    ctx?: Pick<ExecutionContext, 'waitUntil'>,
+  ): Promise<Response> {
     const url = new URL(request.url);
     if (!url.pathname.startsWith('/api/')) return response({ error: 'Endpoint not found.' }, 404);
     try {
@@ -186,13 +193,23 @@ export const api = {
           deviceTransport: 'https-upload',
         });
       if (url.pathname === '/api/device/telemetry' && request.method === 'POST')
-        return await ingestTelemetry(request, env, body);
+        return await ingestTelemetry(request, env, body, ctx);
       const identity = await authenticate(request, env.AUTH0_DOMAIN, env.AUTH0_AUDIENCE);
       if (!['GET', 'HEAD'].includes(request.method) && !allowedOrigin(request))
         throw new HttpError(403, 'Use the household app to make changes.');
       if (url.pathname === '/api/invitations/accept' && request.method === 'POST')
         return await acceptInvitation(request, env, identity);
       const member = await membership(env, identity);
+      if (url.pathname === '/api/push/status' && request.method === 'GET')
+        return response({ configured: pushConfigured(env) });
+      if (url.pathname === '/api/push/register' && request.method === 'POST') {
+        await registerPush(env, member.subject, await body(request));
+        return response({ ok: true, configured: pushConfigured(env) });
+      }
+      if (url.pathname === '/api/push/register' && request.method === 'DELETE') {
+        await disablePush(env, member.subject, await body(request));
+        return response({ ok: true });
+      }
       if (url.pathname === '/api/household' && request.method === 'GET')
         return response(await snapshot(env, member));
       if (url.pathname === '/api/calibration' && request.method === 'POST') {
@@ -373,9 +390,9 @@ export const api = {
 } satisfies ExportedHandler<ApiEnv>;
 
 export default {
-  async fetch(request, env): Promise<Response> {
+  async fetch(request, env, ctx): Promise<Response> {
     if (!new URL(request.url).pathname.startsWith('/api/')) return env.ASSETS.fetch(request);
     if (request.method === 'OPTIONS') return preflight(request);
-    return withCors(request, await api.fetch(request, env));
+    return withCors(request, await api.fetch(request, env, ctx));
   },
 } satisfies ExportedHandler<Env>;

@@ -7,6 +7,7 @@ const config: CapacitorConfig = {
   server: { androidScheme: 'https', cleartext: false },
   android: { backgroundColor: '#f5f7f3' },
   plugins: {
+    PushNotifications: { presentationOptions: ['sound', 'alert'] },
     SystemBars: { style: 'DARK', insetsHandling: 'native', initialViewportFitValueHint: 'contain' },
     StatusBar: { style: 'DARK' },
     Keyboard: { resizeOnFullScreen: true },

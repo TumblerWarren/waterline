@@ -20,6 +20,8 @@ vi.mock('../worker/auth', async (importOriginal) => {
 });
 import worker from '../worker/index';
 import { tokenHash } from '../worker/telemetry';
+import { deliverPush } from '../worker/push';
+import { generateKeyPair, exportPKCS8 } from 'jose';
 let sqlite: DatabaseSync;
 function prepared(sql: string, args: unknown[] = []): any {
   const execute = () => sqlite.prepare(sql);
@@ -81,6 +83,7 @@ beforeEach(() => {
     readFileSync(new URL('../migrations/0005_level_alarms.sql', import.meta.url), 'utf8'),
   );
   sqlite.exec(readFileSync(new URL('../migrations/0006_low_alarm.sql', import.meta.url), 'utf8'));
+  sqlite.exec(readFileSync(new URL('../migrations/0007_push.sql', import.meta.url), 'utf8'));
   sqlite.exec(`INSERT INTO households (id,name,tank_name) VALUES ('home','Our home','Tank'),('other','Another home','Other tank');
     INSERT INTO memberships VALUES ('owner-id','home','owner','Owner','owner@example.com','owner'),
       ('viewer-id','home','viewer','Viewer','viewer@example.com','viewer'),
@@ -90,6 +93,7 @@ beforeEach(() => {
 afterEach(() => {
   sqlite.close();
   vi.clearAllMocks();
+  vi.unstubAllGlobals();
 });
 describe('ESP32 telemetry', () => {
   const credential = `wl_${'a'.repeat(64)}`;
@@ -162,6 +166,83 @@ describe('ESP32 telemetry', () => {
       episode: String(level).padStart(32, 'a'),
     })),
   });
+  it('scopes phone registrations and deletion to the signed-in member', async () => {
+    const registration = { id: crypto.randomUUID(), token: 'fcm_test_token_1234567890' };
+    expect((await call('push/register', 'viewer', 'POST', registration)).status).toBe(200);
+    expect((await call('push/register', 'foreign', 'POST', registration)).status).toBe(409);
+    await call('push/register', 'foreign', 'DELETE', { id: registration.id });
+    expect(sqlite.prepare('SELECT count(*) AS n FROM push_installations').get()).toEqual({ n: 1 });
+    await call('push/register', 'viewer', 'DELETE', { id: registration.id });
+    expect(sqlite.prepare('SELECT count(*) AS n FROM push_installations').get()).toEqual({ n: 0 });
+  });
+  it('queues each alarm episode once per household phone and excludes other households', async () => {
+    await provision();
+    await call('push/register', 'owner', 'POST', {
+      id: crypto.randomUUID(),
+      token: 'owner_token_1234567890',
+    });
+    await call('push/register', 'foreign', 'POST', {
+      id: crypto.randomUUID(),
+      token: 'foreign_token_1234567890',
+    });
+    const data = alarmSample();
+    data.probes.forEach((p) => (p.calibrated = true));
+    expect((await upload(data)).status).toBe(200);
+    await nextCalibrationUpload(data);
+    const rows = sqlite.prepare('SELECT level FROM push_deliveries ORDER BY level').all();
+    expect(rows).toEqual([{ level: 20 }, { level: 50 }, { level: 80 }, { level: 100 }]);
+    data.buzzerEnabled = false;
+    data.levelAlarms.forEach((a) => (a.episode = 'a'.repeat(32)));
+    await nextCalibrationUpload(data);
+    expect(sqlite.prepare('SELECT count(*) AS n FROM push_deliveries').get()).toEqual({ n: 4 });
+  });
+  it('does not claim push is ready without its cloud secret', async () => {
+    expect(await (await call('push/status')).json()).toEqual({ configured: false });
+  });
+  it('delivers queued alarm notifications once and cancels acknowledged episodes', async () => {
+    await provision();
+    await call('push/register', 'owner', 'POST', {
+      id: crypto.randomUUID(),
+      token: 'owner_token_1234567890',
+    });
+    const data = alarmSample();
+    data.probes.forEach((p) => (p.calibrated = true));
+    await upload(data);
+    const keys = await generateKeyPair('RS256', { extractable: true });
+    const sender = {
+      ...env,
+      FCM_SERVICE_ACCOUNT: JSON.stringify({
+        project_id: 'gen-lang-client-0607918582',
+        client_email: 'test@example.com',
+        private_key: await exportPKCS8(keys.privateKey),
+      }),
+    };
+    const send = vi.fn(async (url: string) =>
+      Response.json(
+        url.includes('oauth2') ? { access_token: 'test-access' } : { name: 'accepted' },
+      ),
+    );
+    vi.stubGlobal('fetch', send);
+    await deliverPush(sender);
+    expect(send).toHaveBeenCalledTimes(5);
+    expect(
+      sqlite.prepare("SELECT count(*) AS n FROM push_deliveries WHERE status='sent'").get(),
+    ).toEqual({ n: 4 });
+    await deliverPush(sender);
+    expect(send).toHaveBeenCalledTimes(5);
+    data.levelAlarms.forEach((a) => (a.episode = 'd'.repeat(32)));
+    await nextCalibrationUpload(data);
+    data.levelAlarms.forEach((a) => {
+      a.acknowledged = true;
+      a.active = false;
+    });
+    await nextCalibrationUpload(data);
+    await deliverPush(sender);
+    expect(send).toHaveBeenCalledTimes(5);
+    expect(
+      sqlite.prepare("SELECT count(*) AS n FROM push_deliveries WHERE status='cancelled'").get(),
+    ).toEqual({ n: 4 });
+  });
   it('saves owner settings and delivers them until the board confirms its revision', async () => {
     await provision();
     const data = alarmSample();
@@ -182,6 +263,26 @@ describe('ESP32 telemetry', () => {
     await provision();
     const rules = alarmSample().levelAlarms.map((a) => ({ ...a, onSeconds }));
     expect((await call('alarms/settings', 'owner', 'POST', { rules })).status).toBe(400);
+  });
+  it('adopts newer Bluetooth board settings and saves subsequent cloud edits with a newer revision', async () => {
+    await provision();
+    const data = alarmSample();
+    data.alarmRevision = 7;
+    data.levelAlarms.forEach((a) => {
+      a.onSeconds = 8;
+      a.offSeconds = 90;
+    });
+    expect((await upload(data)).status).toBe(200);
+    let home = await (await call('household')).json();
+    expect(home.alarmSettings.revision).toBe(7);
+    expect(home.alarmSettings.rules[0].onSeconds).toBe(8);
+    const rules = data.levelAlarms.map((a) => ({ ...a, onSeconds: 9 }));
+    expect((await call('alarms/settings', 'owner', 'POST', { rules })).status).toBe(202);
+    expect((await nextCalibrationUpload(data)).headers.get('X-Waterline-Alarms')).toContain(
+      'v2:8:',
+    );
+    home = await (await call('household')).json();
+    expect(home.alarmSettings.revision).toBe(8);
   });
   it('rejects duplicate rules and invalid silence', async () => {
     await provision();

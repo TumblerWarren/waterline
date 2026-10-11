@@ -1,0 +1,25 @@
+# Nearby Bluetooth - Android 0.1.14
+
+Implemented 11 October 2026. BLE provides live four-probe data, calibration values, alarm states, acknowledgement of current episodes, a 10-second buzzer test, global alarm enable/disable, and bounded four-rule alarm edits while the board has no Wi-Fi or internet. The dedicated Nearby board panel is available without cloud login, including when loading the household fails. Cloud and Bluetooth readings remain explicitly separate; Bluetooth does not populate history or send cloud push alerts without board internet.
+
+First pairing:
+1. Open the board's authenticated local /bluetooth page (normally http://192.168.0.119/bluetooth). Use the existing admin login. If home Wi-Fi is unavailable, the board starts Water-Level-Setup after 30 seconds; connect to it and open http://192.168.4.1/bluetooth.
+2. Note its private six-digit code. In Waterline open Nearby board, connect and select Waterline-Rooftop. Allow Android Bluetooth access and enter the code in the Android pairing prompt.
+3. Keep that code private. Android stores the bond. The app remembers only the board address in localStorage and attempts that paired board when cloud readings are unavailable while the app is open. Disconnect removes the automatic reconnect preference. A failed automatic attempt asks for a manual reconnect; it does not repeatedly prompt.
+4. Forget all phones and change pairing code on /bluetooth revokes local access. Cloud account removal alone does not revoke a BLE bond.
+
+Security: NimBLE-Arduino 2.3.7 uses bonding, passkey authentication and encrypted GATT reads/writes (READ_AUTHEN/WRITE_AUTHEN); unauthenticated connections cannot read data or enqueue control commands. The code is randomly generated per board and stored in its ordinary NVS, visible only on the existing authenticated local page. This adds BLE link encryption, not flash or NVS encryption. Anyone authorized with the pairing code has local administrator control, separately from Auth0 household roles. The existing local HTTP setup page remains HTTP; access it on a trusted network. One BLE phone connection is supported at a time.
+
+Transport: service b0a10000-5b7d-4fb0-9b7d-1b4ea17e0001; authenticated request/response characteristics end 0001/0002 in the first UUID field. Protocol 1 requests use random eight-character IDs. Snapshot reads are captured once then paginated in 450-character ASCII chunks; app verifies response IDs, limits total size and rejects invalid data. MTU 512 is requested/supported. The BLE callback only places a bounded command in a four-entry queue; sampling and output mutations run in the Arduino loop while probe excitation is off. Readings poll every five seconds while visible. Measurement age is mapped to the phone clock, so no board internet clock is required. Stale, inconsistent, unknown, uncalibrated and saturated readings never show a confirmed level. No disconnected command queue or delayed replay exists.
+
+Alarm edits: BLE requires exactly the next board revision and validates each rule (sound 1-60 seconds, silence 1-3600 seconds). A newer uploaded board revision is adopted by the backend; subsequent cloud edits increment beyond both stored and reported revisions. Concurrent cloud/offline edits can conflict; refresh and save the intended settings again after reconnecting. Acknowledgements identify the current episode, persist on board, and expire locally; old episodes cannot acknowledge a new alarm. Buzzer tests disable global alarms, so re-enable after testing. Calibration captures remain in the existing cloud/local Wi-Fi controls.
+
+Verification: 117 tests pass, including BLE normalization/freshness/ADC/protocol checks, command encoding, and SQL/API reconciliation after revision 7 is received from the board. TypeScript passes. Android assembleDebug/lintDebug and APK signature pass. APK 0.1.14 (versionCode 15) installed on phone 6947701aa42d. Backend deployment 692f45a6-ca2c-4e21-8020-4f7dc9bea8c8; public health, auth rejection, trusted origins and Auth0 discovery verified. Firmware water-level-v12-ble compiles using 1,264,517/1,310,720 bytes of application flash and 58,200 static RAM bytes. USB application flash completed at 57600 baud with verified hash. Authenticated HTTP status confirms water-level-v12-ble, Wi-Fi connected, four saved calibrations retained and 20/50 wet while 80/100 dry. Serial logs confirm repeated cloud HTTP 200 after BLE initialization. The user confirmed Android passkey pairing and live probe readings in the Nearby board panel. The user then disabled Wi-Fi and mobile data on the phone, kept Bluetooth enabled, and confirmed readings continue updating and the ten-second buzzer test works. The test instructions included re-enabling the local alarm afterward. Actual loss of the board Wi-Fi/router and physical acknowledgement/settings-save tests were not separately exercised in this verification.
+
+APK: releases/waterline-0.1.14-bluetooth.apk
+SHA256: 79E19AAD5D21926376F20EDBB115B8524FA5EE1DABA2A72FA6ADEA080EEA8E24
+
+References: https://github.com/capacitor-community/bluetooth-le and https://github.com/h2zero/NimBLE-Arduino
+
+
+
