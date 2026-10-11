@@ -29,3 +29,5 @@ The owner adds a verified email and Viewer/Operator role. A signed-in non-member
 126 tests pass, including email-only discovery/join, wrong-email rejection, role retention, expiry/revocation, replay and verified-email requirements. TypeScript, backend deployment dry-run, Android build/lint and signature verification pass. Backend deployed as d22e75b9-5f87-4bfa-9e5e-b1454c6da946; health OK and unauthenticated discovery returns 401. Physical sign-in/join using a second family account remains to be confirmed by the user.
 
 APK: releases/waterline-0.2.3-email-join.apk. Includes themed dropdowns, varied card patterns, local Outfit/Manrope fonts, smaller launcher droplet, sign-in progress and error cards.
+
+0.2.4: Viewers can acknowledge active household alarms; alarm settings, buzzer tests and device control permissions unchanged. Board confirmation remains required. Includes popup close-button alignment fix. 126 tests, typecheck, backend dry-run, Android build/lint and APK verification passed. Backend version f07a2c9c-3c31-432b-819a-c6c6618148f0. APK: releases/waterline-0.2.4-viewer-ack.apk.

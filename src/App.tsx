@@ -1315,7 +1315,7 @@ export default function App() {
               {page === 'settings' ? (
                 <>
                   <section className="panel app-info">
-                    <h2>Waterline 0.2.3</h2>
+                    <h2>Waterline 0.2.4</h2>
                     <p>Your household’s tank, connected through Cloud or nearby Bluetooth.</p>
                   </section>
                   <div className="page-heading">

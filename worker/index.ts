@@ -259,8 +259,6 @@ export const api = {
         return response(await snapshot(env, member), 202);
       }
       if (url.pathname === '/api/alarms/ack' && request.method === 'POST') {
-        if (member.role === 'viewer')
-          throw new HttpError(403, 'Operator or Owner access is required.');
         await acknowledgeAlarms(env, member.household_id, await body(request));
         await audit(
           env,

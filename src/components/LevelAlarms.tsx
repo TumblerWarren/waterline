@@ -1,8 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import {
   defaultAlarmRules,
-  mayOperate,
-  canTestBuzzer,
   alarmAcknowledgementState,
   type AlarmRule,
   type Household,
@@ -44,8 +42,13 @@ export function LevelAlarms({
           : message
       : message;
   const active = reported?.filter((a) => a.active) ?? [];
-  const connected = canTestBuzzer(home.role, home.reading, now);
-  const canAck = !preview && mayOperate(home.role) && connected && !busy && !externalBusy;
+  const connected = Boolean(
+    home.reading?.connected &&
+    home.reading.lastSeen !== null &&
+    home.reading?.lastSeen !== undefined &&
+    now - home.reading.lastSeen <= 30_000,
+  );
+  const canAck = !preview && connected && !busy && !externalBusy;
   const pending = home.alarmAcknowledgements?.some(
     (a) =>
       a.status === 'queued' && active.some((r) => r.level === a.level && r.episode === a.episode),

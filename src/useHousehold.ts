@@ -331,8 +331,7 @@ export function useHousehold(preview: boolean) {
     else setLive(await request<Household>('/api/alarms/settings', 'POST', { rules }));
   }
   async function acknowledgeLevels(alarms: LevelAlarm[]) {
-    if (!household || !mayOperate(household.role))
-      throw new Error('Operator or Owner access is required.');
+    if (!household) throw new Error('Join your household before acknowledging alarms.');
     if (preview)
       setDemo((current) => ({
         ...current,

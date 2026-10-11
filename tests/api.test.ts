@@ -304,7 +304,7 @@ describe('ESP32 telemetry', () => {
     const data = alarmSample();
     await upload(data);
     const alarms = data.levelAlarms.map((a) => ({ level: a.level, episode: a.episode }));
-    expect((await call('alarms/ack', 'viewer', 'POST', { alarms })).status).toBe(403);
+    expect((await call('alarms/ack', 'viewer', 'POST', { alarms })).status).toBe(202);
     expect((await call('alarms/ack', 'operator', 'POST', { alarms })).status).toBe(202);
     expect((await call('alarms/ack', 'owner', 'POST', { alarms })).status).toBe(202);
     const delivery = (await nextCalibrationUpload(data)).headers.get('X-Waterline-Alarm-Ack');
