@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSession } from './auth';
 import { isNative } from './native';
 import { apiBase } from '../shared/mobile';
@@ -22,6 +22,9 @@ export function useHousehold(preview: boolean) {
   const [pendingInvitations, setPendingInvitations] = useState<
     Array<{ id: string; householdName: string; role: 'viewer' | 'operator'; expiresAt: number }>
   >([]);
+  const liveRef = useRef<Household | null>(null);
+  const lastHistoryFetch = useRef(0);
+  const lastHouseholdFetch = useRef(0);
   const [live, setLive] = useState<Household | null>(null);
   const [scenario, setScenario] = useState<Scenario>('normal');
   const [role, setRole] = useState<Role>('owner');
@@ -54,12 +57,39 @@ export function useHousehold(preview: boolean) {
     },
     [session],
   );
+  const historyBusy = useRef(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState('');
+  const refreshHistory = useCallback(async () => {
+    if (preview || !session.authenticated || historyBusy.current) return;
+    historyBusy.current = true;
+    setHistoryLoading(true);
+    setHistoryError('');
+    try {
+      const result = await request<{ householdId: string; history: Household['history'] }>(
+        '/api/history?refresh=true',
+      );
+      setLive((current) =>
+        current?.id === result.householdId ? { ...current, history: result.history } : current,
+      );
+      lastHistoryFetch.current = Date.now();
+    } catch (error) {
+      setHistoryError(error instanceof Error ? error.message : 'Unable to load history.');
+    } finally {
+      historyBusy.current = false;
+      setHistoryLoading(false);
+    }
+  }, [preview, session.authenticated, request]);
   const refresh = useCallback(async () => {
     if (preview || !session.authenticated) return;
     setLoading(true);
     setError('');
     try {
-      setLive(await request<Household>('/api/household'));
+      const data = await request<Household>('/api/household');
+      liveRef.current = data;
+      lastHistoryFetch.current = Date.now();
+      lastHouseholdFetch.current = Date.now();
+      setLive(data);
       setPendingInvitations([]);
     } catch (error) {
       setLive(null);
@@ -79,40 +109,85 @@ export function useHousehold(preview: boolean) {
   useEffect(() => {
     let active = true;
     if (preview || !session.authenticated) {
+      liveRef.current = null;
+      lastHistoryFetch.current = 0;
+      lastHouseholdFetch.current = 0;
       setLive(null);
       setPendingInvitations([]);
       return;
     }
     setLoading(true);
     let fetching = false;
-    const poll = () => {
+    const poll = async () => {
       if (fetching || document.visibilityState === 'hidden') return;
       fetching = true;
-      request<Household>('/api/household')
-        .then((data) => {
-          if (active) {
-            setLive(data);
-            setPendingInvitations([]);
-            setError('');
+      try {
+        const now = Date.now();
+        if (!liveRef.current || now - lastHouseholdFetch.current >= 15 * 60000) {
+          const data = await request<Household>('/api/household');
+          if (!active) return;
+          liveRef.current = data;
+          lastHistoryFetch.current = now;
+          lastHouseholdFetch.current = now;
+          setLive(data);
+        } else {
+          const data =
+            await request<
+              Pick<
+                Household,
+                | 'role'
+                | 'reading'
+                | 'calibrationCommand'
+                | 'buzzerCommand'
+                | 'alarmSettings'
+                | 'alarmAcknowledgements'
+              >
+            >('/api/reading');
+          if (!active) return;
+          // Merge into the current state so in-flight updates cannot erase history.
+          setLive((current) => {
+            const next = current ? { ...current, ...data } : null;
+            liveRef.current = next;
+            return next;
+          });
+          if (now - lastHistoryFetch.current >= 15 * 60000) {
+            const result = await request<{ householdId: string; history: Household['history'] }>(
+              '/api/history',
+            );
+            if (active)
+              setLive((current) =>
+                current?.id === result.householdId
+                  ? { ...current, history: result.history }
+                  : current,
+              );
+            lastHistoryFetch.current = now;
           }
-        })
-        .catch(async (error) => {
+        }
+        if (active) {
+          setPendingInvitations([]);
+          setError('');
+        }
+      } catch (error) {
+        if (!active) return;
+        // Do not make a second database request for quota/network/server outages.
+        const message = error instanceof Error ? error.message : 'Unable to load your household.';
+        if (message.includes('has not been added')) {
+          liveRef.current = null;
+          setLive(null);
           try {
-            const data = await request<{ invitations: typeof pendingInvitations }>(
+            const result = await request<{ invitations: typeof pendingInvitations }>(
               '/api/invitations/pending',
             );
-            if (active) setPendingInvitations(data.invitations);
+            if (active) setPendingInvitations(result.invitations);
           } catch {
             if (active) setPendingInvitations([]);
           }
-          if (active) {
-            setError(error instanceof Error ? error.message : 'Unable to load your household.');
-          }
-        })
-        .finally(() => {
-          fetching = false;
-          if (active) setLoading(false);
-        });
+        }
+        if (active) setError(message);
+      } finally {
+        fetching = false;
+        if (active) setLoading(false);
+      }
     };
     poll();
     const timer = window.setInterval(poll, 10000);
@@ -286,6 +361,13 @@ export function useHousehold(preview: boolean) {
     setLive(result.household);
     return isNative ? result.mobileInvitationUrl : result.invitationUrl;
   }
+  async function leaveHousehold() {
+    if (household?.role === 'owner') throw new Error('The household owner cannot leave.');
+    await request('/api/household/leave', 'POST', {});
+    setLive(null);
+    setPendingInvitations([]);
+    setError('You left the household. Ask an owner to add your email to join again.');
+  }
   async function changeMember(id: string, memberRole: 'viewer' | 'operator' | null) {
     requireOwner();
     if (household?.members.find((member) => member.id === id)?.role === 'owner')
@@ -370,6 +452,9 @@ export function useHousehold(preview: boolean) {
   }
   return {
     household,
+    refreshHistory,
+    historyLoading,
+    historyError,
     pendingInvitations,
     scenario,
     role,
@@ -381,6 +466,7 @@ export function useHousehold(preview: boolean) {
     saveSettings,
     invite,
     changeMember,
+    leaveHousehold,
     revokeInvitation,
     acknowledge,
     saveAlarms,

@@ -234,6 +234,21 @@ export const api = {
         await disablePush(env, member.subject, await body(request));
         return response({ ok: true });
       }
+      if (url.pathname === '/api/reading' && request.method === 'GET') {
+        return response({
+          role: member.role,
+          ...(await householdTelemetry(env, member.household_id, false)),
+        });
+      }
+      if (url.pathname === '/api/history' && request.method === 'GET') {
+        const telemetry = await householdTelemetry(
+          env,
+          member.household_id,
+          true,
+          url.searchParams.get('refresh') === 'true',
+        );
+        return response({ householdId: member.household_id, history: telemetry.history });
+      }
       if (url.pathname === '/api/household' && request.method === 'GET')
         return response(await snapshot(env, member));
       if (url.pathname === '/api/calibration' && request.method === 'POST') {
@@ -348,6 +363,30 @@ export const api = {
           201,
         );
       }
+      if (url.pathname === '/api/household/leave' && request.method === 'POST') {
+        if (member.role === 'owner')
+          throw new HttpError(
+            409,
+            'The household owner cannot leave. Owner access must be transferred first.',
+          );
+        await env.DB.batch([
+          env.DB.prepare(
+            'INSERT INTO audit_events (id, household_id, actor, at, title, detail) VALUES (?, ?, ?, ?, ?, ?)',
+          ).bind(
+            crypto.randomUUID(),
+            member.household_id,
+            member.subject,
+            Date.now(),
+            'Member left household',
+            `${member.name} left the household.`,
+          ),
+          env.DB.prepare(
+            "DELETE FROM memberships WHERE id=? AND subject=? AND role != 'owner'",
+          ).bind(member.id, member.subject),
+          env.DB.prepare('DELETE FROM push_installations WHERE subject=?').bind(member.subject),
+        ]);
+        return response({ ok: true });
+      }
       const memberMatch = url.pathname.match(/^\/api\/members\/([^/]+)$/);
       if (memberMatch && ['PATCH', 'DELETE'].includes(request.method)) {
         owner(member);
@@ -403,6 +442,17 @@ export const api = {
       throw new HttpError(404, 'Endpoint not found.');
     } catch (error) {
       if (error instanceof HttpError) return response({ error: error.message }, error.status);
+      const message = error instanceof Error ? error.message : '';
+      if (/daily.*(read|write).*limit|exceeded.*free tier|7500/i.test(message)) {
+        return response(
+          {
+            error:
+              'Cloud database daily limit reached. Cloud access resumes after the midnight UTC reset (5:30 AM IST). Nearby Bluetooth still works.',
+          },
+          503,
+        );
+      }
+
       console.error(
         JSON.stringify({ event: 'api_error', requestId: crypto.randomUUID(), path: url.pathname }),
       );

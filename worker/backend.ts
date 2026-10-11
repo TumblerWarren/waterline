@@ -1,6 +1,7 @@
 import { api, type ApiEnv } from './index';
 import { preflight, withCors } from './cors';
 import { deliverPush } from './push';
+import { pruneTelemetry } from './telemetry';
 
 // Dedicated Android backend: deploy the API without bundling the unfinished web UI.
 export default {
@@ -18,5 +19,7 @@ export default {
   },
   async scheduled(_event, env) {
     await deliverPush(env);
+    if (new Date(_event.scheduledTime).getUTCMinutes() === 0)
+      await pruneTelemetry(env, _event.scheduledTime);
   },
 } satisfies ExportedHandler<ApiEnv>;

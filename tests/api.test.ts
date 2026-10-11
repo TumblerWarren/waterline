@@ -19,7 +19,7 @@ vi.mock('../worker/auth', async (importOriginal) => {
   };
 });
 import worker from '../worker/index';
-import { tokenHash } from '../worker/telemetry';
+import { tokenHash, pruneTelemetry } from '../worker/telemetry';
 import { deliverPush } from '../worker/push';
 import { generateKeyPair, exportPKCS8 } from 'jose';
 let sqlite: DatabaseSync;
@@ -810,5 +810,118 @@ describe('household invitations', () => {
     expect((await call('invitations/accept', 'new-user', 'POST', { token: revoked })).status).toBe(
       410,
     );
+  });
+});
+
+describe('Leaving a household', () => {
+  it.each(['viewer', 'operator'])(
+    'allows %s to leave only their own household',
+    async (subject) => {
+      sqlite
+        .prepare('INSERT INTO push_installations(id,subject,token,updated_at) VALUES(?,?,?,?)')
+        .run('phone', subject, 'test-token', Date.now());
+      const result = await call('household/leave', subject, 'POST', { subject: 'owner' });
+      expect(result.status).toBe(200);
+      expect(
+        sqlite.prepare('SELECT id FROM memberships WHERE subject=?').get(subject),
+      ).toBeUndefined();
+      expect(
+        sqlite.prepare('SELECT id FROM memberships WHERE subject=?').get('owner'),
+      ).toBeTruthy();
+      expect(
+        sqlite.prepare('SELECT id FROM push_installations WHERE subject=?').get(subject),
+      ).toBeUndefined();
+      expect((await call('household', subject)).status).toBe(403);
+    },
+  );
+  it('prevents the owner from abandoning the household', async () => {
+    expect((await call('household/leave', 'owner', 'POST', {})).status).toBe(409);
+    expect(sqlite.prepare("SELECT id FROM memberships WHERE subject='owner'").get()).toBeTruthy();
+  });
+  it('requires membership and authentication', async () => {
+    expect((await call('household/leave', 'new-user', 'POST', {})).status).toBe(403);
+    expect((await call('household/leave', '', 'POST', {})).status).toBe(401);
+  });
+});
+
+describe('Seven-day history', () => {
+  it('includes yesterday and six days ago despite more than 120 recent samples, preserving changes and gaps', async () => {
+    sqlite
+      .prepare('INSERT INTO devices(id,household_id,token_hash) VALUES(?,?,?)')
+      .run('history-device', 'home', 'hash');
+    const now = Date.now();
+    const insert = sqlite.prepare(
+      'INSERT INTO telemetry(device_id,sample_id,received_at,band) VALUES(?,?,?,?)',
+    );
+    insert.run('history-device', 'old', now - 8 * 86400000, 'full');
+    insert.run('history-device', 'six-days', now - 6 * 86400000, 'middle');
+    insert.run('history-device', 'yesterday', now - 25 * 3600000, 'full');
+    for (let i = 0; i < 200; i++)
+      insert.run(
+        'history-device',
+        String(i),
+        now - (200 - i) * 10000,
+        i === 50 ? 'low' : 'near-full',
+      );
+    const home = await (await call('household')).json();
+    expect(home.history.some((p: any) => p.at === now - 6 * 86400000)).toBe(true);
+    expect(home.history.some((p: any) => p.at === now - 25 * 3600000)).toBe(true);
+    expect(home.history.some((p: any) => p.at === now - 8 * 86400000)).toBe(false);
+    expect(home.history.some((p: any) => p.band === 'low')).toBe(true);
+    expect(home.history.some((p: any) => p.band === 'offline')).toBe(true);
+    expect(home.history.length).toBeLessThan(120);
+    expect(home.history.every((p: any, i: number, a: any[]) => !i || p.at >= a[i - 1].at)).toBe(
+      true,
+    );
+  });
+});
+
+describe('cloud database availability', () => {
+  it('explains a daily quota outage without presenting it as a sign-in failure', async () => {
+    const query = vi.spyOn(env.DB, 'prepare').mockImplementationOnce(() => {
+      throw new Error("D1_ERROR: Your account has exceeded D1's free tier daily row read limit.");
+    });
+    try {
+      const result = await call('household', 'viewer');
+      expect(result.status).toBe(503);
+      expect((await result.json()).error).toContain('5:30 AM IST');
+    } finally {
+      query.mockRestore();
+    }
+  });
+});
+
+describe('efficient live polling and retention', () => {
+  it('live reads skip telemetry history and retain membership guards', async () => {
+    const spy = vi.spyOn(env.DB, 'prepare');
+    try {
+      const result = await call('reading', 'viewer');
+      expect(result.status).toBe(200);
+      expect((await result.json()).history).toEqual([]);
+      expect(spy.mock.calls.some(([sql]) => /FROM telemetry/i.test(sql))).toBe(false);
+      expect((await call('reading', 'foreign')).status).toBe(200);
+      expect((await call('reading', 'unknown-user')).status).toBe(403);
+      expect((await call('history', '')).status).toBe(401);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+  it('hourly cleanup retains yesterday and six days ago, deleting only older samples', async () => {
+    const now = Date.now();
+    sqlite
+      .prepare('INSERT INTO devices(id,household_id,token_hash) VALUES(?,?,?)')
+      .run('cleanup-device', 'home', 'cleanup');
+    const insert = sqlite.prepare(
+      'INSERT INTO telemetry(device_id,sample_id,received_at,band) VALUES(?,?,?,?)',
+    );
+    for (const days of [1, 6, 8])
+      insert.run('cleanup-device', String(days), now - days * 86400000, 'middle');
+    await pruneTelemetry(env as unknown as Env, now);
+    expect(
+      sqlite
+        .prepare('SELECT sample_id FROM telemetry ORDER BY sample_id')
+        .all()
+        .map((r) => r.sample_id),
+    ).toEqual(['1', '6']);
   });
 });

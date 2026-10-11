@@ -1,3 +1,4 @@
+import { t } from '../language';
 import { useEffect, useRef, type ReactNode } from 'react';
 import { X } from 'lucide-react';
 export function Dialog({
@@ -33,8 +34,8 @@ export function Dialog({
       }}
     >
       <div className="dialog-heading">
-        <h2 id="dialog-title">{title}</h2>
-        <button className="icon-button" onClick={close} aria-label="Close dialog">
+        <h2 id="dialog-title">{t(title)}</h2>
+        <button className="icon-button" onClick={close} aria-label={t('Close dialog')}>
           <X size={20} />
         </button>
       </div>

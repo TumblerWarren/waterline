@@ -31,3 +31,20 @@ The owner adds a verified email and Viewer/Operator role. A signed-in non-member
 APK: releases/waterline-0.2.3-email-join.apk. Includes themed dropdowns, varied card patterns, local Outfit/Manrope fonts, smaller launcher droplet, sign-in progress and error cards.
 
 0.2.4: Viewers can acknowledge active household alarms; alarm settings, buzzer tests and device control permissions unchanged. Board confirmation remains required. Includes popup close-button alignment fix. 126 tests, typecheck, backend dry-run, Android build/lint and APK verification passed. Backend version f07a2c9c-3c31-432b-819a-c6c6618148f0. APK: releases/waterline-0.2.4-viewer-ack.apk.
+
+## 0.2.7 household, language and history update
+- Owner long-press and accessible menu actions open member removal confirmation; scrolling cancels the long press.
+- Viewers/operators may leave their own household after confirmation. The API removes membership and phone registrations atomically. Owners cannot leave while retaining Owner access.
+- Settings offers saved English/Bengali navigation, headings and common controls; detailed diagnostics and some dynamic messages remain English. No board changes.
+- History plots scroll horizontally within the card for 24-hour and seven-day ranges, retain timestamp spacing/gaps, and distinguish a swipe from tapping a sample.
+- Validation: 130 tests, typecheck, Android build/lint and APK signature passed. Backend deployed. Physical phone gesture/language checks remain pending; phone was not connected at delivery.
+
+## 0.2.8 reported clipping, language and history fixes
+- Header participates in sticky document flow. Shared app/card width constraints prevent child content from widening the phone viewport; bottom navigation remains within the viewport.
+- Bengali coverage expanded across screens, preparation instructions, status feedback and dynamic labels. User-entered names and hardware identifiers remain unchanged.
+- History API previously returned only 120 recent samples from one day. It now summarizes seven days into first/last five-minute samples while retaining every band change and the edges of real offline gaps. Overview explicitly filters to 24 hours.
+- Regression test verifies yesterday/six-day-old records remain visible despite 200 recent samples, old records are excluded, brief changes retained and gaps explicit. 131 tests pass.
+- Type checking, Android build/lint and APK signature pass. Actual components checked at 360/393/430 px with no document overflow and inner horizontal scrolling. Installed on connected Android phone. Cloud database confirms 4,270 samples starting 11 October 2026 12:51 IST. No firmware changes.
+
+## 0.2.10 database efficiency
+Live polling uses authenticated /api/reading without history or household-list scans. Household/history refresh every fifteen minutes while visible; History navigation and refresh button request the recent tail with a sixty-second cache. Older history has a daily server cache and recent history a fifteen-minute cache; SQL window scans replaced by indexed range reads and in-memory reduction preserving transitions and outages. Hourly indexed retention cleanup keeps seven days rather than deleting at each heartbeat. Raw telemetry uploads and firmware remain unchanged to preserve heartbeat deduplication and diagnostic fidelity. Tests: 134 passed; Android build/lint and APK signature verified. Backend deployed; actual remote read/write savings await the quota reset.

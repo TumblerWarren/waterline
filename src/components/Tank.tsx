@@ -1,3 +1,4 @@
+import { t } from '../language';
 import { useId } from 'react';
 import type { Band } from '../../shared/model';
 export function Tank({
@@ -43,8 +44,8 @@ export function Tank({
         role="img"
         aria-label={
           uncertain
-            ? 'Tank level cannot currently be confirmed'
-            : `${stale ? 'Last known' : 'Confirmed'} ${band} level band, not an exact percentage`
+            ? t('Tank level cannot currently be confirmed')
+            : `${stale ? t('Last known') : 'Confirmed'} ${band} level band, not an exact percentage`
         }
       >
         <defs>

@@ -1,3 +1,4 @@
+import { t } from '../language';
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { BleClient } from '@capacitor-community/bluetooth-le';
 import {
@@ -233,9 +234,9 @@ export function NearbyBoard() {
     <section className="bluetooth-workspace">
       <div className="page-heading">
         <div>
-          <p className="eyebrow">CLOSER TO HOME</p>
-          <h1>Connect nearby.</h1>
-          <p>Your board, even without internet.</p>
+          <p className="eyebrow">{t('CLOSER TO HOME')}</p>
+          <h1>{t('Connect nearby.')}</h1>
+          <p>{t('Your board, even without internet.')}</p>
         </div>
       </div>
       <div className={`panel bluetooth-card ${nearby.connected ? 'is-connected' : ''}`}>
@@ -243,10 +244,10 @@ export function NearbyBoard() {
           <Bluetooth size={46} />
         </div>
         <span className="status-pill">
-          {nearby.connected ? 'Connected over Bluetooth' : 'Not connected'}
+          {nearby.connected ? t('Connected over Bluetooth') : t('Not connected')}
         </span>
-        <h2>{nearby.connected ? 'Waterline · Rooftop' : 'Your tank is a tap away.'}</h2>
-        <p role="status">{nearby.status}</p>
+        <h2>{nearby.connected ? 'Waterline · Rooftop' : t('Your tank is a tap away.')}</h2>
+        <p role="status">{t(nearby.status)}</p>
         <button
           className="button primary"
           disabled={!isNative || nearby.busy}
@@ -257,36 +258,42 @@ export function NearbyBoard() {
           }
         >
           {nearby.busy
-            ? 'Please wait…'
+            ? t('Please wait…')
             : nearby.connected
-              ? 'Disconnect Bluetooth'
-              : 'Connect nearby board'}
+              ? t('Disconnect Bluetooth')
+              : t('Connect nearby board')}
         </button>
-        {!isNative ? <p>Bluetooth pairing is available in the Android app.</p> : null}
+        {!isNative ? <p>{t('Bluetooth pairing is available in the Android app.')}</p> : null}
         {nearby.connected ? (
           <p>
-            Live readings and controls are available in Overview, Probes and Alarm. Choose Bluetooth
-            in the connection selector.
+            {t(
+              'Live readings and controls are available in Overview, Probes and Alarm. Choose Bluetooth in the connection selector.',
+            )}
           </p>
         ) : null}
       </div>
       <div className="panel bluetooth-guide">
-        <h2>First connection</h2>
+        <h2>{t('First connection')}</h2>
         <ol>
-          <li>Keep Bluetooth on and move close to your board.</li>
-          <li>Tap Connect nearby board and select Waterline-Rooftop.</li>
+          <li>{t('Keep Bluetooth on and move close to your board.')}</li>
+          <li>{t('Tap Connect nearby board and select Waterline-Rooftop.')}</li>
           <li>
-            Accept Android pairing and enter your private six-digit code from the board’s local
-            Bluetooth setup page (/bluetooth).
+            {t(
+              'Accept Android pairing and enter your private six-digit code from the board’s local Bluetooth setup page (/bluetooth).',
+            )}
           </li>
         </ol>
         <p>
-          <ShieldCheck size={18} /> Bluetooth is encrypted. Pairing grants local control
-          independently of cloud accounts. Revoke paired phones on the board’s setup page.
+          <ShieldCheck size={18} />
+          {t(
+            'Bluetooth is encrypted. Pairing grants local control independently of cloud accounts. Revoke paired phones on the board’s setup page.',
+          )}
         </p>
         <p>
-          <WifiOff size={18} /> Nearby readings work while this app is open. History and remote
-          phone notifications need internet. Calibration capture needs the cloud connection.
+          <WifiOff size={18} />
+          {t(
+            'Nearby readings work while this app is open. History and remote phone notifications need internet. Calibration capture needs the cloud connection.',
+          )}
         </p>
       </div>
     </section>

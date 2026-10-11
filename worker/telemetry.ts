@@ -210,10 +210,6 @@ export async function ingestTelemetry(
       data.sampleId,
       now,
     ),
-    env.DB.prepare('DELETE FROM telemetry WHERE device_id = ? AND received_at < ?').bind(
-      device.id,
-      now - 86400000,
-    ),
   ]);
   if (result[0].meta.changes !== 1)
     throw new HttpError(429, 'Sample already received or upload too frequent.');
@@ -237,7 +233,12 @@ export async function ingestTelemetry(
     },
   );
 }
-export async function householdTelemetry(env: ApiEnv, householdId: string) {
+export async function householdTelemetry(
+  env: ApiEnv,
+  householdId: string,
+  includeHistory = true,
+  freshHistory = false,
+) {
   const device = await env.DB.prepare(
     'SELECT id, last_seen, latest FROM devices WHERE household_id = ? AND enabled = 1',
   )
@@ -246,20 +247,112 @@ export async function householdTelemetry(env: ApiEnv, householdId: string) {
   const reading: Reading | null = device?.latest ? JSON.parse(device.latest) : null;
   if (reading)
     reading.connected = device!.last_seen !== null && Date.now() - device!.last_seen! <= 30000;
-  const points = device
-    ? await env.DB.prepare(
-        `SELECT received_at AS at, band FROM telemetry WHERE device_id = ?
-    AND received_at >= ? ORDER BY received_at DESC LIMIT 120`,
+  // Cache only history, never identities, membership or live controls. Revocation is
+  // checked on every request before this private server-side cache is consulted.
+  const historyKey =
+    device && includeHistory
+      ? new Request(
+          `https://waterline-history.internal/${freshHistory ? 'fresh-v2' : 'v2'}/${encodeURIComponent(device.id)}`,
+        )
+      : null;
+  const cache = typeof caches !== 'undefined' ? caches.default : undefined;
+  const cached = cache && historyKey ? await cache.match(historyKey) : undefined;
+  let points: { results: { at: number; band: Band; previous_at: number | null }[] };
+  if (!includeHistory) points = { results: [] };
+  else if (cached) points = await cached.json<typeof points>();
+  else if (device && includeHistory) {
+    // Older history changes only through retention. Reuse it for a day, while
+    // rebuilding the recent tail every fifteen minutes. No cached user access.
+    const archiveKey = new Request(
+      `https://waterline-history.internal/archive-v2/${encodeURIComponent(device.id)}`,
+    );
+    const archived = cache ? await cache.match(archiveKey) : undefined;
+    let archive: { cutoff: number; rows: { at: number; band: Band }[] };
+    if (archived) archive = await archived.json<typeof archive>();
+    else {
+      const cutoff = Date.now() - 86400000;
+      const older = await env.DB.prepare(
+        'SELECT received_at AS at, band FROM telemetry WHERE device_id=? AND received_at>=? AND received_at<? ORDER BY received_at',
       )
-        .bind(device.id, Date.now() - 86400000)
-        .all<{ at: number; band: Band }>()
-    : { results: [] };
+        .bind(device.id, Date.now() - 7 * 86400000, cutoff)
+        .all<{ at: number; band: Band }>();
+      archive = { cutoff, rows: older.results };
+      if (cache)
+        await cache
+          .put(
+            archiveKey,
+            new Response(JSON.stringify(archive), {
+              headers: { 'Content-Type': 'application/json', 'Cache-Control': 'max-age=86400' },
+            }),
+          )
+          .catch(() => {});
+    }
+    const recent = await env.DB.prepare(
+      'SELECT received_at AS at, band FROM telemetry WHERE device_id=? AND received_at>=? ORDER BY received_at',
+    )
+      .bind(device.id, archive.cutoff)
+      .all<{ at: number; band: Band }>();
+    const rows = [...archive.rows, ...recent.results].filter(
+      (p) => p.at >= Date.now() - 7 * 86400000,
+    );
+    // Reduce returned points in memory, avoiding several SQL window-function scans.
+    // Keep bucket boundaries, every band change, and both sides of real outages.
+    points = {
+      results: rows.flatMap((point, index) => {
+        const previous = rows[index - 1],
+          next = rows[index + 1];
+        const bucket = Math.floor(point.at / 300000);
+        const keep =
+          !previous ||
+          !next ||
+          Math.floor(previous.at / 300000) !== bucket ||
+          Math.floor(next.at / 300000) !== bucket ||
+          previous.band !== point.band ||
+          next.band !== point.band ||
+          point.at - previous.at > 60000 ||
+          next.at - point.at > 60000;
+        return keep ? [{ ...point, previous_at: previous?.at ?? null }] : [];
+      }),
+    };
+    if (cache && historyKey) {
+      await cache
+        .put(
+          historyKey,
+          new Response(JSON.stringify(points), {
+            headers: {
+              'Content-Type': 'application/json',
+              'Cache-Control': freshHistory ? 'max-age=60' : 'max-age=900',
+            },
+          }),
+        )
+        .catch(() => {});
+    }
+  } else points = { results: [] };
   return {
     reading,
     alarmSettings: device ? await readAlarmSettings(env, device.id) : undefined,
     alarmAcknowledgements: device ? await alarmAcknowledgements(env, device.id) : [],
-    history: points.results.reverse(),
+    history: points.results.flatMap((point, index) => {
+      const previous = points.results[index - 1];
+      return previous && point.previous_at !== null && point.at - point.previous_at > 60000
+        ? [
+            { at: point.previous_at! + 30000, band: 'offline' as Band },
+            { at: point.at - 1, band: 'offline' as Band },
+            point,
+          ]
+        : [{ at: point.at, band: point.band }];
+    }),
     calibrationCommand: device ? await latestCalibration(env, device.id) : null,
     buzzerCommand: device ? await latestBuzzer(env, device.id) : null,
   };
+}
+
+export async function pruneTelemetry(env: ApiEnv, now = Date.now()) {
+  // One scheduled cleanup replaces a delete on every ten-second heartbeat.
+  const devices = await env.DB.prepare('SELECT id FROM devices').all<{ id: string }>();
+  for (const device of devices.results) {
+    await env.DB.prepare('DELETE FROM telemetry WHERE device_id = ? AND received_at < ?')
+      .bind(device.id, now - 7 * 86400000)
+      .run();
+  }
 }

@@ -1,3 +1,4 @@
+import { t } from '../language';
 import { useEffect, useRef } from 'react';
 import { LoaderCircle, ShieldCheck, TriangleAlert, X } from 'lucide-react';
 export function SignInFeedback({
@@ -38,7 +39,7 @@ export function SignInFeedback({
       {!pending ? (
         <button
           className="icon-button feedback-close"
-          aria-label="Dismiss sign-in error"
+          aria-label={t('Dismiss sign-in error')}
           onClick={dismiss}
         >
           <X size={20} />
@@ -47,20 +48,22 @@ export function SignInFeedback({
       <div className={pending ? 'feedback-symbol' : 'feedback-symbol is-error'}>
         {pending ? <ShieldCheck size={30} /> : <TriangleAlert size={30} />}
       </div>
-      <h2 id="auth-feedback-title">{pending ? 'Signing you in' : 'Sign-in could not complete'}</h2>
+      <h2 id="auth-feedback-title">
+        {pending ? t('Signing you in') : t('Sign-in could not complete')}
+      </h2>
       <p id="auth-feedback-description">
         {pending
-          ? 'Complete sign-in in the secure window. We’ll open your household when you return.'
+          ? t('Complete sign-in in the secure window. We’ll open your household when you return.')
           : error}
       </p>
       {pending ? (
         <div className="sign-in-progress" role="status">
           <LoaderCircle size={20} />
-          <span>Waiting for secure sign-in…</span>
+          <span>{t('Waiting for secure sign-in…')}</span>
         </div>
       ) : (
         <button className="button primary full-width" onClick={dismiss}>
-          Back to sign in
+          {t('Back to sign in')}
         </button>
       )}
     </dialog>

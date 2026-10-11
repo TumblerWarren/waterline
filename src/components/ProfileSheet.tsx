@@ -1,3 +1,4 @@
+import { t } from '../language';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { X } from 'lucide-react';
 
@@ -53,8 +54,12 @@ export function ProfileSheet({ children, close }: { children: ReactNode; close: 
         <span />
       </div>
       <div className="dialog-heading">
-        <h2 id="profile-sheet-title">Your profile</h2>
-        <button className="icon-button" onClick={() => setClosing(true)} aria-label="Close profile">
+        <h2 id="profile-sheet-title">{t('Your profile')}</h2>
+        <button
+          className="icon-button"
+          onClick={() => setClosing(true)}
+          aria-label={t('Close profile')}
+        >
           <X size={22} />
         </button>
       </div>
