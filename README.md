@@ -70,12 +70,12 @@ sequenceDiagram
     participant DB as D1 database
     participant ESP as ESP32 board
     App->>API: Request control with Auth0 access token
-    API->>DB: Check membership and permissions; store request
+    API->>DB: Check membership and permissions, then store request
     API-->>App: Accepted / pending board confirmation
     ESP->>API: HTTPS telemetry with device credential
-    API->>DB: Validate device; update latest reading
+    API->>DB: Validate device and update latest reading
     API-->>ESP: Upload response with pending command
-    ESP->>ESP: Validate and apply command; persist state
+    ESP->>ESP: Validate and apply command, then persist state
     ESP->>API: Next telemetry reports result
     API->>DB: Record board confirmation
     App->>API: Refresh reading and command status
@@ -93,34 +93,11 @@ sequenceDiagram
 | Common electrode | GPIO14 | Pulsed probe excitation |
 | Buzzer output | GPIO23 | Local alarm output through the detector's buzzer circuit |
 
-### Detector connections
+### Reference sensing schematic
 
-This is a functional connection map. Each level electrode connects through its sensing/filter circuit; it is not a direct-wiring schematic. Use the firmware guide for the circuit details.
+![ESP32 water-level detector sensing circuit and buzzer driver](ESP32_water_level_no_relay_final.png)
 
-```mermaid
-flowchart LR
-    subgraph Tank[Water tank electrodes]
-        P100[100% electrode]
-        P80[80% electrode]
-        P50[50% electrode]
-        P20[20% electrode]
-        Common[Common electrode]
-    end
-    subgraph Detector[ESP32 detector]
-        Inputs[Probe sensing and filter circuits]
-        ADC[ADC inputs: GPIO32 / 33 / 34 / 36]
-        Excite[GPIO14: current-limited excitation]
-        Logic[Filtering, calibration and alarm logic]
-        Out[GPIO23: buzzer output]
-    end
-    P100 -->|GPIO32 channel| Inputs
-    P80 -->|GPIO33 channel| Inputs
-    P50 -->|GPIO34 channel| Inputs
-    P20 -->|GPIO36 channel| Inputs
-    Inputs --> ADC --> Logic
-    Excite --> Common
-    Logic --> Out --> Driver[Buzzer driver circuit] --> Sound[Local buzzer]
-```
+This reference drawing shows five level electrodes (20/40/60/80/100%) and a passive buzzer driver. The current firmware uses four levels (20/50/80/100%), with GPIO34 assigned to 50% and GPIO35 unused. Follow the pin table above for the current implementation.
 
 The detector reports **bands**, such as `50–80%` or `80–100%`, rather than an exact water volume. Probe positions must match the intended tank levels. Invalid, inconsistent, saturated or uncalibrated inputs are not presented as a confirmed level.
 
@@ -158,7 +135,7 @@ Local silence affects the phone; board acknowledgement affects the alarm episode
 ```mermaid
 flowchart TD
     Episode[Fresh active unacknowledged board episode] --> Policy{Phone DND active?}
-    Policy -->|Yes| Defer[Defer phone start; suppress notification and sound]
+    Policy -->|Yes| Defer[Defer phone start and suppress notification and sound]
     Defer --> End[Quiet hours end]
     End --> Recheck{Fresh episode still active and unacknowledged?}
     Recheck -->|Yes| Deliver[FCM start event to registered phone]
