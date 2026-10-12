@@ -216,10 +216,9 @@ Water-Level/
 │   ├── scripts/                     Configuration, provisioning and checks
 │   ├── public/ and assets/          Fonts, icon master and packaged artwork
 │   └── wrangler.backend.jsonc       Dedicated API deployment configuration
-├── ESP32_Water_Level_Detector/
-│   ├── src/ and include/            Detector, buzzer, HTTPS and BLE firmware
-│   └── platformio.ini               Board/toolchain configuration
-└── reference/                       Motor-starter reference material
+└── ESP32_Water_Level_Detector/
+    ├── src/ and include/            Detector, buzzer, HTTPS and BLE firmware
+    └── platformio.ini               Board/toolchain configuration
 ```
 
 Generated dependencies, builds, releases, private configuration and diagnostics remain local. The repository preserves the original app history and now tracks all source components from one root.
