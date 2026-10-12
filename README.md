@@ -59,6 +59,29 @@ flowchart LR
 
 The app defaults to fresh Cloud readings and falls back to fresh connected Bluetooth data when Cloud is unavailable. Explicit source selection remains explicit, and commands retain the source selected when submitted. **History and app calibration capture require Cloud; Bluetooth capture is not implemented.** Bluetooth readings are not uploaded as cloud history by the phone.
 
+### Cloud readings and command confirmation
+
+The board starts every cloud exchange. A phone command waits for the next upload response, and the app shows completion only after the board reports it.
+
+```mermaid
+sequenceDiagram
+    participant App as Android app
+    participant API as Cloudflare Worker
+    participant DB as D1 database
+    participant ESP as ESP32 board
+    App->>API: Request control with Auth0 access token
+    API->>DB: Check membership and permissions; store request
+    API-->>App: Accepted / pending board confirmation
+    ESP->>API: HTTPS telemetry with device credential
+    API->>DB: Validate device; update latest reading
+    API-->>ESP: Upload response with pending command
+    ESP->>ESP: Validate and apply command; persist state
+    ESP->>API: Next telemetry reports result
+    API->>DB: Record board confirmation
+    App->>API: Refresh reading and command status
+    API-->>App: Board-confirmed result
+```
+
 ## Probe hardware and calibration
 
 | Electrode / output | ESP32 pin | Function |
@@ -69,6 +92,35 @@ The app defaults to fresh Cloud readings and falls back to fresh connected Bluet
 | 100% | GPIO32 | Full-level probe |
 | Common electrode | GPIO14 | Pulsed probe excitation |
 | Buzzer output | GPIO23 | Local alarm output through the detector's buzzer circuit |
+
+### Detector connections
+
+This is a functional connection map. Each level electrode connects through its sensing/filter circuit; it is not a direct-wiring schematic. Use the firmware guide for the circuit details.
+
+```mermaid
+flowchart LR
+    subgraph Tank[Water tank electrodes]
+        P100[100% electrode]
+        P80[80% electrode]
+        P50[50% electrode]
+        P20[20% electrode]
+        Common[Common electrode]
+    end
+    subgraph Detector[ESP32 detector]
+        Inputs[Probe sensing and filter circuits]
+        ADC[ADC inputs: GPIO32 / 33 / 34 / 36]
+        Excite[GPIO14: current-limited excitation]
+        Logic[Filtering, calibration and alarm logic]
+        Out[GPIO23: buzzer output]
+    end
+    P100 -->|GPIO32 channel| Inputs
+    P80 -->|GPIO33 channel| Inputs
+    P50 -->|GPIO34 channel| Inputs
+    P20 -->|GPIO36 channel| Inputs
+    Inputs --> ADC --> Logic
+    Excite --> Common
+    Logic --> Out --> Driver[Buzzer driver circuit] --> Sound[Local buzzer]
+```
 
 The detector reports **bands**, such as `50–80%` or `80–100%`, rather than an exact water volume. Probe positions must match the intended tank levels. Invalid, inconsistent, saturated or uncalibrated inputs are not presented as a confirmed level.
 
@@ -98,6 +150,31 @@ Timing and enabled state can be changed in the app. The highest active unacknowl
 - **Phone DND:** a personal on/off schedule in Settings, with start/end times and overnight support. During quiet hours the app suppresses phone notifications and sound. The board buzzer continues independently.
 
 At the end of DND, the cloud scheduler rechecks the board and can deliver still-active, unacknowledged episodes. Allow approximately one scheduler minute plus network/FCM delay. DND does not bypass Android's own sound/channel policies. Phone alarms depend on connectivity, notification permission and Android background restrictions; they are not guaranteed exact-time alarm-clock delivery.
+
+### Phone alarm lifecycle
+
+Local silence affects the phone; board acknowledgement affects the alarm episode. Quiet hours defer phone alerts while board alarms continue independently.
+
+```mermaid
+flowchart TD
+    Episode[Fresh active unacknowledged board episode] --> Policy{Phone DND active?}
+    Policy -->|Yes| Defer[Defer phone start; suppress notification and sound]
+    Defer --> End[Quiet hours end]
+    End --> Recheck{Fresh episode still active and unacknowledged?}
+    Recheck -->|Yes| Deliver[FCM start event to registered phone]
+    Recheck -->|No| Quiet[Phone stays quiet]
+    Policy -->|No| Deliver
+    Deliver --> Native{Permission, local DND and silence checks pass?}
+    Native -->|Yes| Ring[Native service loops alarm ringtone]
+    Native -->|No| Quiet
+    Ring --> Silence[Person silences or dismisses phone]
+    Silence --> Stop[Stop phone sound]
+    Ring --> Clear[Board episode clears or acknowledgement is confirmed]
+    Clear --> Reconcile[Cloud stop event or fresh-reading reconciliation]
+    Reconcile --> Stop
+    Ring --> DND[Quiet hours begin]
+    DND --> Defer
+```
 
 ## Family access
 
