@@ -1,0 +1,25 @@
+# Cloud readings and calibration
+
+Firmware `water-level-v11-low-config` sends readings to `https://waterline.devbuildtool.com/api/device/telemetry` every ten seconds using a private device credential. HTTPS validates the certificate chain and hostname with public trust roots and an SNTP clock. Credentials remain in ignored headers; D1 stores only their hashes. No router port forwarding is needed.
+
+Four probes: GPIO36/20%, GPIO34/50%, GPIO33/80%, GPIO32/100%. Schema 3 includes calibration progress and values. Legacy schemas 1 and 2 remain supported; old three-probe 50-100% history retains its original label.
+
+Calibration version 3 requires fresh DRY and WET captures on all four channels because the extra probe changes common-electrode loading. Wi-Fi remains saved. The household Owner uses the Android Calibration page and confirms physical preparation. DRY: all four level electrodes clean, dry, out of water and separated. WET: all four and common immersed in the same water without touching. Each capture takes 20 cycles (about 100 seconds), then allow three cycles for confirmation. Final tank installation needs another calibration.
+
+Only calibration commands are queued. Requests are scoped to the authenticated household's enabled device, expire after five minutes, and arrive with its next telemetry response. The device validates the ID, mode and expiry and passes the request to the main sensing loop. It persists the command ID before execution to prevent replay across retries or reboot. Interrupted requests are rejected on reboot. Firmware checks capture readiness again. Cloud status is queued, started, complete, rejected or expired. Capture completion is separate from sufficient dry/wet separation; the app displays per-probe quality.
+
+The local `/probe` page still supports recovery and individual-channel calibration. HTTP 200 means a telemetry upload was accepted; the app checks measurement and contact freshness separately. A prior 200 alone does not prove current connectivity.
+
+Local sensing and alarms continue without internet. Unknown or uncalibrated levels suppress automatic alarms. Below 20%, configurable beeping defaults to a 60-second burst followed by 540 seconds silence, with 0.5 seconds on/off during the burst; it stops when acknowledged or at/above 20%. 50%, 80% and 100% have configurable alarms, defaulting to 10 seconds ON / 50 seconds OFF until acknowledged or dry. Mobile buzzer test/enable/disable requests arrive through authenticated HTTPS upload responses. Requests expire after 60 seconds; applied IDs are persisted before execution and never replayed. A test sounds continuously for ten seconds, then stops; automatic alarms stay disabled until re-enabled. Board acknowledgement appears in the app. Motor commands are not implemented.
+
+USB flashing preserves NVS. If automatic entry fails, disconnect all power, hold BOOT, reconnect USB and release BOOT once writing begins. Soldered wiring need not be removed. Earlier OTA attempts failed; wireless update reliability remains unverified.
+
+Calibration progress reports targetCycles=20 and dryNoise/wetNoise, the full spread of the cycle medians. At the user's request, calibration now requires saved WET minus DRY strictly above 500; capture variation is informational and does not reject calibration. Both captures must be saved, and saturated WET values remain invalid. Saved DRY calibration is retained for a WET-only recapture.
+
+Level settings and each wet episode acknowledgement are saved in the level-alarms NVS namespace. Dry confirmation re-arms the probe; unknown readings never clear acknowledgements. X-Waterline-Alarms delivers monotonic settings revisions. X-Waterline-Alarm-Ack is scoped to the current probe episode, with expiry checked against SNTP. No laptop is required for later timing changes or acknowledgements. Highest unsilenced wet level wins; below-20% runs when its probe is dry. It re-arms after wet then dry. The v2 settings header contains four rules ordered 20,50,80,100. NVS version 2 imports the prior three rules and their acknowledgements.
+
+## Connection and credential storage
+
+At startup the board reads the home SSID/password from the water-wifi NVS config record and connects to the router. It uploads directly to the HTTPS cloud endpoint using its device token, with CA and hostname validation. The cloud stores only a token hash. Router port forwarding and a continuously connected computer are unnecessary.
+
+Current firmware does not configure NVS or flash encryption. The Wi-Fi password is stored as an ordinary NVS string; the device token and local dashboard password are compiled into firmware. These secrets are not encrypted at rest on this prototype. HTTPS protects the cloud link, while the local setup/dashboard uses HTTP with authentication, not TLS. Hardware-backed storage protection requires a separate secure provisioning design (NVS encryption, flash encryption and secure boot), with recovery/update planning before programming irreversible eFuses. No security eFuses were changed for the Probes page.
