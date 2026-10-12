@@ -598,6 +598,47 @@ describe('ESP32 telemetry', () => {
       if (result.ok) expect((await (await call('household')).json()).reading.band).toBe('unknown');
     },
   );
+  it('keeps live heartbeats fresh but stores five-minute checkpoints and every change', async () => {
+    await provision();
+    let now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      const data = sample();
+      const send = async () => {
+        data.sampleId = crypto.randomUUID().replaceAll('-', '');
+        data.sentAt = now;
+        expect((await upload(data)).status).toBe(200);
+      };
+      await send();
+      for (let i = 0; i < 29; i++) {
+        now += 10000;
+        await send();
+      }
+      expect(sqlite.prepare('SELECT count(*) AS n FROM telemetry').get()?.n).toBe(1);
+      expect(sqlite.prepare('SELECT last_seen FROM devices').get()?.last_seen).toBe(now);
+      now += 10000;
+      await send();
+      expect(sqlite.prepare('SELECT count(*) AS n FROM telemetry').get()?.n).toBe(2);
+      now += 10000;
+      data.probes.forEach((p) => {
+        p.state = 'DRY';
+        p.median = 0;
+      });
+      await send();
+      expect(sqlite.prepare('SELECT count(*) AS n FROM telemetry').get()?.n).toBe(4);
+      const first = await (await call('history')).json();
+      expect(first.history.some((p: { band: string }) => p.band === 'offline')).toBe(false);
+      now += 120000;
+      await send();
+      const gap = await (await call('history?refresh=true')).json();
+      expect(gap.history.filter((p: { band: string }) => p.band === 'offline')).toHaveLength(2);
+      const home = await (await call('household')).json();
+      expect(home.reading._storage).toBeUndefined();
+      expect(home.reading.connected).toBe(true);
+    } finally {
+      clock.mockRestore();
+    }
+  });
   it('deduplicates uploads and does not refresh a duplicate heartbeat', async () => {
     await provision();
     const data = sample();

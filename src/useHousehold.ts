@@ -118,8 +118,10 @@ export function useHousehold(preview: boolean) {
     }
     setLoading(true);
     let fetching = false;
+    let nextPoll = 0;
+    let failures = 0;
     const poll = async () => {
-      if (fetching || document.visibilityState === 'hidden') return;
+      if (fetching || document.visibilityState === 'hidden' || Date.now() < nextPoll) return;
       fetching = true;
       try {
         const now = Date.now();
@@ -163,6 +165,14 @@ export function useHousehold(preview: boolean) {
             lastHistoryFetch.current = now;
           }
         }
+        failures = 0;
+        const current = liveRef.current;
+        const pending = [
+          current?.calibrationCommand?.status,
+          current?.buzzerCommand?.status,
+          ...(current?.alarmAcknowledgements?.map((a) => a.status) ?? []),
+        ].some((status) => status === 'queued' || status === 'started');
+        nextPoll = Date.now() + (pending ? 5000 : 30000);
         if (active) {
           setPendingInvitations([]);
           setError('');
@@ -171,6 +181,12 @@ export function useHousehold(preview: boolean) {
         if (!active) return;
         // Do not make a second database request for quota/network/server outages.
         const message = error instanceof Error ? error.message : 'Unable to load your household.';
+        failures++;
+        nextPoll =
+          Date.now() +
+          (message.includes('daily limit')
+            ? 15 * 60000
+            : Math.min(5 * 60000, 30000 * 2 ** Math.min(failures - 1, 4)));
         if (message.includes('has not been added')) {
           liveRef.current = null;
           setLive(null);
@@ -190,7 +206,7 @@ export function useHousehold(preview: boolean) {
       }
     };
     poll();
-    const timer = window.setInterval(poll, 10000);
+    const timer = window.setInterval(poll, 5000);
     const resume = () => {
       if (document.visibilityState === 'visible') poll();
     };

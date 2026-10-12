@@ -1420,7 +1420,7 @@ export default function App() {
                 <>
                   <div className="settings-intro">
                     <section className="panel app-info">
-                      <h2>Waterline 0.2.10</h2>
+                      <h2>Waterline 0.2.11</h2>
                       <p>
                         {t('Your household’s tank, connected through Cloud or nearby Bluetooth.')}
                       </p>

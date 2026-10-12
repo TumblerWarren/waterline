@@ -1,6 +1,6 @@
 import { HttpError } from './auth';
 import type { ApiEnv } from './index';
-import type { Band, Reading, Probe } from '../shared/model';
+import type { Band, Reading, Probe, HistoryPoint } from '../shared/model';
 import { calibrationReply, latestCalibration } from './calibration';
 import { buzzerReply, latestBuzzer } from './buzzer';
 import { alarmTelemetry, alarmReply, readAlarmSettings, alarmAcknowledgements } from './alarms';
@@ -183,33 +183,77 @@ export async function ingestTelemetry(
   const token = request.headers.get('Authorization')?.match(/^Bearer (wl_[a-f0-9]{64})$/)?.[1];
   if (!token) throw new HttpError(401, 'Invalid device credential.');
   const digest = await tokenHash(token);
-  const device = await env.DB.prepare('SELECT id FROM devices WHERE token_hash = ? AND enabled = 1')
+  const device = await env.DB.prepare(
+    'SELECT id, last_seen, latest FROM devices WHERE token_hash = ? AND enabled = 1',
+  )
     .bind(digest)
-    .first<{ id: string }>();
+    .first<{ id: string; last_seen: number | null; latest: string | null }>();
   if (!device) throw new HttpError(401, 'Invalid device credential.');
   const data = await readBody(request);
   const now = Date.now();
   const reading = normalizeTelemetry(data, now);
-  // The conditional insert enforces per-device throttling atomically. Only a newly
-  // inserted sample may update last-seen; retries cannot make old readings fresh.
+  type StoredReading = Reading & {
+    _storage?: { lastSampleId: string; lastSentAt: number; historyAt: number };
+  };
+  const previous: StoredReading | null = device.latest ? JSON.parse(device.latest) : null;
+  const storage = previous?._storage;
+  // Reject retries and older sender timestamps, including samples omitted from history.
+  if (
+    storage &&
+    (storage.lastSampleId === data.sampleId || Number(data.sentAt) < storage.lastSentAt)
+  )
+    throw new HttpError(429, 'Sample already received or upload too frequent.');
+  const historyAt = storage?.historyAt ?? device.last_seen ?? 0;
+  const gap = device.last_seen !== null && now - device.last_seen > 60000;
+  const changed =
+    previous &&
+    (previous.band !== reading.band ||
+      previous.fault !== reading.fault ||
+      previous.calibrated !== reading.calibrated);
+  const save = !previous || gap || changed || now - historyAt >= 300000;
+  const entries: { sample: string; at: number; band: HistoryPoint['band'] }[] = [];
+  const sample = `sparse:${data.sampleId}`;
+  if (gap) {
+    entries.push({
+      sample: sample + ':end',
+      at: device.last_seen!,
+      band: previous?.band ?? 'unknown',
+    });
+    entries.push({ sample: sample + ':offline', at: device.last_seen! + 30000, band: 'offline' });
+    entries.push({ sample: sample + ':resume', at: now - 1, band: 'offline' });
+  } else if (changed && device.last_seen !== null) {
+    entries.push({ sample: sample + ':before', at: device.last_seen, band: previous!.band });
+  }
+  if (save) entries.push({ sample, at: now, band: reading.band });
+  const stored: StoredReading = {
+    ...reading,
+    _storage: {
+      lastSampleId: String(data.sampleId),
+      lastSentAt: Number(data.sentAt),
+      historyAt: save ? now : historyAt,
+    },
+  };
+  // Compare-and-swap heartbeat plus optional history rows is one transaction.
+  // A history checkpoint is no longer required for live freshness or command delivery.
   const result = await env.DB.batch([
     env.DB.prepare(
-      `INSERT OR IGNORE INTO telemetry(device_id,sample_id,received_at,band)
-      SELECT id,?,?,? FROM devices WHERE id = ? AND enabled = 1 AND token_hash = ? AND (last_seen IS NULL OR last_seen <= ?)`,
-    ).bind(data.sampleId, now, reading.band, device.id, digest, now - 4000),
-    env.DB.prepare(
-      `UPDATE devices SET last_seen = ?, latest = ? WHERE id = ? AND enabled = 1 AND token_hash = ? AND (last_seen IS NULL OR last_seen <= ?)
-      AND changes() = 1 AND EXISTS(SELECT 1 FROM telemetry WHERE device_id = ? AND sample_id = ? AND received_at = ?)`,
+      `UPDATE devices SET last_seen=?, latest=? WHERE id=? AND enabled=1 AND token_hash=? AND last_seen IS ? AND (last_seen IS NULL OR last_seen<=?)
+      AND NOT EXISTS(SELECT 1 FROM telemetry WHERE device_id=? AND sample_id IN (?,?))`,
     ).bind(
       now,
-      JSON.stringify(reading),
+      JSON.stringify(stored),
       device.id,
       digest,
+      device.last_seen,
       now - 4000,
       device.id,
       data.sampleId,
-      now,
+      sample,
     ),
+    env.DB.prepare(
+      `INSERT OR IGNORE INTO telemetry(device_id,sample_id,received_at,band)
+      SELECT ?,json_extract(value,'$.sample'),json_extract(value,'$.at'),json_extract(value,'$.band') FROM json_each(?) WHERE changes()=1`,
+    ).bind(device.id, JSON.stringify(entries)),
   ]);
   if (result[0].meta.changes !== 1)
     throw new HttpError(429, 'Sample already received or upload too frequent.');
@@ -245,6 +289,7 @@ export async function householdTelemetry(
     .bind(householdId)
     .first<{ id: string; last_seen: number | null; latest: string | null }>();
   const reading: Reading | null = device?.latest ? JSON.parse(device.latest) : null;
+  if (reading) delete (reading as Reading & { _storage?: unknown })._storage;
   if (reading)
     reading.connected = device!.last_seen !== null && Date.now() - device!.last_seen! <= 30000;
   // Cache only history, never identities, membership or live controls. Revocation is
@@ -252,30 +297,40 @@ export async function householdTelemetry(
   const historyKey =
     device && includeHistory
       ? new Request(
-          `https://waterline-history.internal/${freshHistory ? 'fresh-v2' : 'v2'}/${encodeURIComponent(device.id)}`,
+          `https://waterline-history.internal/${freshHistory ? 'fresh-v3' : 'v3'}/${encodeURIComponent(device.id)}`,
         )
       : null;
   const cache = typeof caches !== 'undefined' ? caches.default : undefined;
   const cached = cache && historyKey ? await cache.match(historyKey) : undefined;
-  let points: { results: { at: number; band: Band; previous_at: number | null }[] };
+  let points: {
+    results: {
+      at: number;
+      band: HistoryPoint['band'];
+      previous_at: number | null;
+      sparse?: boolean;
+    }[];
+  };
   if (!includeHistory) points = { results: [] };
   else if (cached) points = await cached.json<typeof points>();
   else if (device && includeHistory) {
     // Older history changes only through retention. Reuse it for a day, while
     // rebuilding the recent tail every fifteen minutes. No cached user access.
     const archiveKey = new Request(
-      `https://waterline-history.internal/archive-v2/${encodeURIComponent(device.id)}`,
+      `https://waterline-history.internal/archive-v3/${encodeURIComponent(device.id)}`,
     );
     const archived = cache ? await cache.match(archiveKey) : undefined;
-    let archive: { cutoff: number; rows: { at: number; band: Band }[] };
+    let archive: {
+      cutoff: number;
+      rows: { at: number; band: HistoryPoint['band']; sparse?: boolean }[];
+    };
     if (archived) archive = await archived.json<typeof archive>();
     else {
       const cutoff = Date.now() - 86400000;
       const older = await env.DB.prepare(
-        'SELECT received_at AS at, band FROM telemetry WHERE device_id=? AND received_at>=? AND received_at<? ORDER BY received_at',
+        `SELECT received_at AS at, band, sample_id LIKE 'sparse:%' AS sparse FROM telemetry WHERE device_id=? AND received_at>=? AND received_at<? ORDER BY received_at`,
       )
         .bind(device.id, Date.now() - 7 * 86400000, cutoff)
-        .all<{ at: number; band: Band }>();
+        .all<{ at: number; band: HistoryPoint['band']; sparse?: boolean }>();
       archive = { cutoff, rows: older.results };
       if (cache)
         await cache
@@ -288,10 +343,10 @@ export async function householdTelemetry(
           .catch(() => {});
     }
     const recent = await env.DB.prepare(
-      'SELECT received_at AS at, band FROM telemetry WHERE device_id=? AND received_at>=? ORDER BY received_at',
+      `SELECT received_at AS at, band, sample_id LIKE 'sparse:%' AS sparse FROM telemetry WHERE device_id=? AND received_at>=? ORDER BY received_at`,
     )
       .bind(device.id, archive.cutoff)
-      .all<{ at: number; band: Band }>();
+      .all<{ at: number; band: HistoryPoint['band']; sparse?: boolean }>();
     const rows = [...archive.rows, ...recent.results].filter(
       (p) => p.at >= Date.now() - 7 * 86400000,
     );
@@ -334,7 +389,10 @@ export async function householdTelemetry(
     alarmAcknowledgements: device ? await alarmAcknowledgements(env, device.id) : [],
     history: points.results.flatMap((point, index) => {
       const previous = points.results[index - 1];
-      return previous && point.previous_at !== null && point.at - point.previous_at > 60000
+      return previous &&
+        !point.sparse &&
+        point.previous_at !== null &&
+        point.at - point.previous_at > 60000
         ? [
             { at: point.previous_at! + 30000, band: 'offline' as Band },
             { at: point.at - 1, band: 'offline' as Band },
