@@ -2070,3 +2070,10 @@ select:disabled {
     grid-template-columns: 1fr;
   }
 }
+
+.phone-dnd .check-label { display:flex; align-items:center; gap:12px; min-height:48px; }
+.phone-dnd .check-label input { width:22px; height:22px; margin:0; accent-color:#2563eb; }
+.dnd-times { border:0; padding:0; margin:16px 0; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
+.dnd-times[hidden] { display:none; }
+.dnd-times input { width:100%; min-width:0; min-height:48px; }
+.phone-dnd p { margin:12px 0; line-height:1.6; }

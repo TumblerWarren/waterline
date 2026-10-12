@@ -1,5 +1,5 @@
 import { androidOrigin } from '../shared/mobile';
-const methods = ['GET', 'POST', 'PATCH', 'DELETE'];
+const methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
 export function allowedOrigin(request: Request) {
   const origin = request.headers.get('Origin');
   return origin === new URL(request.url).origin || origin === androidOrigin;

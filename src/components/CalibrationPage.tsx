@@ -63,16 +63,20 @@ export function CalibrationPage({
       ) : null}
       <div className="panel">
         <h2>{t('Calibrate all four probes')}</h2>
-        <p>
-          {t(
-            'Use the connected cable and electrodes. A bucket is fine for initial testing; repeat calibration after the final tank installation.',
-          )}
-        </p>
-        <p>
-          {t(
-            'Each capture takes about 100 seconds after delivery. Cloud progress refreshes every ten seconds. Keep the electrodes in position until the capture finishes. Automatic low-water beeping stays silent during calibration.',
-          )}
-        </p>
+        <ul className="calibration-instructions">
+          <li>{t('Use the connected cable and electrodes.')}</li>
+          <li>
+            {t(
+              'A bucket is fine for initial testing; repeat calibration after the final tank installation.',
+            )}
+          </li>
+        </ul>
+        <ul className="calibration-instructions">
+          <li>{t('Each capture takes about 100 seconds after delivery.')}</li>
+          <li>{t('Cloud progress refreshes every ten seconds.')}</li>
+          <li>{t('Keep the electrodes in position until the capture finishes.')}</li>
+          <li>{t('Automatic low-water beeping stays silent during calibration.')}</li>
+        </ul>
         {!connected ? (
           <p role="status">{t('Waiting for the ESP32 to connect.')}</p>
         ) : !supported ? (
@@ -115,9 +119,7 @@ export function CalibrationPage({
         ) : null}
         {command ? (
           <p role="status">
-            {t('Last')}
-            {command.mode.toUpperCase()}
-            {t('request:')}{' '}
+            {t('Last')} {command.mode.toUpperCase()} {t('request:')}{' '}
             {command.expiresAt < now && ['queued', 'started'].includes(command.status)
               ? t('expired — check connectivity and request again')
               : command.status === 'queued'
@@ -136,11 +138,11 @@ export function CalibrationPage({
       </div>
       <div className="panel">
         <h2>{t('1. Capture DRY')}</h2>
-        <p>
-          {t(
-            'Remove all four level electrodes from the water. Clean and dry them, and keep them separated. This replaces the previous dry and wet calibration.',
-          )}
-        </p>
+        <ul className="calibration-instructions">
+          <li>{t('Remove all four level electrodes from the water.')}</li>
+          <li>{t('Clean and dry them, and keep them separated.')}</li>
+          <li>{t('This replaces the previous dry and wet calibration.')}</li>
+        </ul>
         <label className="capture-confirm">
           <input
             type="checkbox"
@@ -160,11 +162,14 @@ export function CalibrationPage({
       </div>
       <div className="panel">
         <h2>{t('2. Capture WET')}</h2>
-        <p>
-          {t(
-            'After DRY finishes, immerse the 20%, 50%, 80% and 100% electrodes and the common electrode in the same water. Keep every electrode from touching another.',
-          )}
-        </p>
+        <ul className="calibration-instructions">
+          <li>
+            {t(
+              'After DRY finishes, immerse the 20%, 50%, 80% and 100% electrodes and the common electrode in the same water.',
+            )}
+          </li>
+          <li>{t('Keep every electrode from touching another.')}</li>
+        </ul>
         {!dryReady ? <p>{t('Complete DRY on all four probes first.')}</p> : null}
         <label className="capture-confirm">
           <input
@@ -230,11 +235,11 @@ export function CalibrationPage({
             </tbody>
           </table>
         </div>
-        <p>
-          {t(
-            'After WET finishes, allow about 15 seconds for stable confirmation. Then test each electrode transition. Tank readings should follow 20% → 50% → 80% → 100% as water rises.',
-          )}
-        </p>
+        <ul className="calibration-instructions">
+          <li>{t('After WET finishes, allow about 15 seconds for stable confirmation.')}</li>
+          <li>{t('Then test each electrode transition.')}</li>
+          <li>{t('Tank readings should follow 20% → 50% → 80% → 100% as water rises.')}</li>
+        </ul>
       </div>
     </section>
   );

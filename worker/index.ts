@@ -6,7 +6,7 @@ import { ingestTelemetry, householdTelemetry } from './telemetry';
 import { queueCalibration } from './calibration';
 import { queueBuzzer } from './buzzer';
 import { saveAlarmSettings, acknowledgeAlarms } from './alarms';
-import { registerPush, disablePush, pushConfigured, deliverPush } from './push';
+import { registerPush, disablePush, pushConfigured, deliverPush, saveQuietHours } from './push';
 export type ApiEnv = Pick<Env, 'DB' | 'AUTH0_DOMAIN' | 'AUTH0_AUDIENCE'> & {
   FCM_SERVICE_ACCOUNT?: string;
 };
@@ -231,6 +231,11 @@ export const api = {
         if (typeof ctx?.waitUntil === 'function') ctx.waitUntil(deliverPush(env));
         return response({ ok: true, configured: pushConfigured(env) });
       }
+      if (url.pathname === '/api/push/quiet-hours' && request.method === 'PUT') {
+        await saveQuietHours(env, member.subject, await body(request));
+        if (typeof ctx?.waitUntil === 'function') ctx.waitUntil(deliverPush(env));
+        return response({ ok: true });
+      }
       if (url.pathname === '/api/push/register' && request.method === 'DELETE') {
         await disablePush(env, member.subject, await body(request));
         return response({ ok: true });
@@ -238,7 +243,13 @@ export const api = {
       if (url.pathname === '/api/reading' && request.method === 'GET') {
         return response({
           role: member.role,
-          ...(await householdTelemetry(env, member.household_id, false, false, url.searchParams.get('controls') !== 'false')),
+          ...(await householdTelemetry(
+            env,
+            member.household_id,
+            false,
+            false,
+            url.searchParams.get('controls') !== 'false',
+          )),
         });
       }
       if (url.pathname === '/api/history' && request.method === 'GET') {

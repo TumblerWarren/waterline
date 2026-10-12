@@ -65,7 +65,7 @@ describe('Android API CORS', () => {
   });
   it('rejects other origins, methods and headers', () => {
     expect(preflight(options('https://attacker.example')).status).toBe(403);
-    expect(preflight(options('https://localhost', 'PUT')).status).toBe(403);
+    expect(preflight(options('https://localhost', 'TRACE')).status).toBe(403);
     expect(preflight(options('https://localhost', 'POST', 'X-Unapproved')).status).toBe(403);
   });
   it('adds CORS to authenticated errors so Android can explain them', () => {

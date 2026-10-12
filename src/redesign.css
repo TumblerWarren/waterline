@@ -2012,3 +2012,36 @@ body,
 .history-plot-shell .history-plot-viewport {
   min-width: 0;
 }
+
+/* Personal phone settings stay separate from shared household preferences. */
+.phone-dnd { margin-top:24px; margin-bottom:28px; }
+.phone-dnd .settings-form label.check-label { display:flex; flex-direction:row; align-items:center; gap:12px; min-height:48px; margin:12px 0 18px; }
+.phone-dnd .settings-form label.check-label input[type='checkbox'] { flex:0 0 22px; width:22px; height:22px; margin:0; padding:0; vertical-align:middle; }
+
+.language-settings h2 { margin-bottom:20px; }
+.settings-panel .setting-row { display:grid; grid-template-columns:minmax(0,1fr) 38px; align-items:center; gap:18px; width:100%; }
+.settings-panel .setting-row > span { min-width:0; overflow-wrap:break-word; }
+.settings-panel .setting-row small { display:block; white-space:normal; line-height:1.6; }
+.settings-panel .setting-row input.switch { width:38px; min-width:38px; margin:0; justify-self:end; }
+.settings-panel .settings-footer { margin-top:24px; padding:0; }
+.calibration-workspace label.capture-confirm { display:flex; align-items:flex-start; gap:12px; line-height:1.65; margin:22px 0; }
+.calibration-workspace label.capture-confirm input[type='checkbox'] { flex:0 0 22px; width:22px; height:22px; margin:2px 0 0; }
+.calibration-workspace label.capture-confirm span { flex:1; min-width:0; }
+.calibration-instructions { padding-left:22px; margin:18px 0; line-height:1.7; }
+.calibration-instructions li { padding-left:4px; margin:10px 0; overflow-wrap:break-word; }
+.time-field > span { display:block; margin-bottom:10px; font-size:14px; }
+.time-trigger { display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%; min-height:52px; padding:12px; border:1px solid #b9d5f8; border-radius:16px; background:linear-gradient(120deg,#e8f7ff,#edf0ff); color:#2563eb; font-size:20px; }
+.themed-clock { max-width:320px; margin:auto; }
+.clock-display,.clock-period,.clock-actions { display:flex; align-items:center; justify-content:center; gap:12px; margin:16px 0; }
+.clock-display { font-size:32px; font-variant-numeric:tabular-nums; }
+.clock-display button,.clock-period button { border:0; border-radius:12px; padding:8px 14px; background:#eef5ff; color:#102a43; }
+.themed-clock .selected { background:#2563eb; color:white; }
+.clock-dial { width:260px; height:260px; max-width:100%; margin:20px auto; position:relative; border-radius:50%; background:radial-gradient(circle,#e0f5ff,#edf0ff); }
+.clock-dial button { position:absolute; transform:translate(-50%,-50%); width:42px; height:42px; border:0; border-radius:50%; background:transparent; color:#102a43; font-size:16px; }
+.clock-hand { position:absolute; width:2px; height:36%; background:#90b9ff; left:calc(50% - 1px); bottom:50%; transform-origin:bottom; }
+.themed-clock .exact-minute { display:flex; align-items:center; justify-content:center; gap:12px; }
+.exact-minute input { width:80px; }
+.clock-actions .button { flex:1; min-width:0; }
+.history-refresh-controls { margin-bottom:22px; }
+
+.settings-panel .setting-row input.switch:checked::before { transform:translateX(18px); }

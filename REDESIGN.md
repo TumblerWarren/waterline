@@ -62,3 +62,26 @@ History stores five-minute checkpoints, level/fault/calibration transitions and 
 - Migration 0008_phone_alarm.sql applied remotely; Worker version 09691296-006e-46ef-ac58-bda8fe4a0010 deployed.
 - 138 tests, TypeScript, Android assembleDebug and lintDebug passed. APK signature verified; version 0.2.12 (28), 8,572,383 bytes, installed on connected phone. User confirmed continuous ten-second ringtone and immediate Silence. Real FCM start/stop playback while backgrounded remains to be confirmed on the phone during the next board alarm; do not claim that end-to-end flow was physically tested.
 - No ESP32 firmware changes.
+
+## 0.2.13 — phone DND in Settings
+
+- Personal DND toggle and start/end time fields under Settings, accessible to every signed-in household role. Overnight schedules supported. Bengali labels and save feedback included; timezone is the phone timezone at initial setup.
+- Native quiet checks suppress notifications and looping audio, stop an already-running phone alarm at quiet-hour entry, retain alarm episodes and honor local Silence/Dismiss tombstones.
+- Installation-scoped cloud policy defers starts during quiet hours. Indexed minute scheduler checks fresh board state at the end and resumes only current unacknowledged episodes. Stale board state is retried; internet and Android/FCM delivery restrictions apply, so allow about a minute plus delivery delay. No exact-alarm permission or ESP32 firmware change.
+- Migration 0009_quiet_hours.sql applied remotely. Live Worker version d0fefbd9-3009-46d9-b42c-02fd6b0bdd73 verified at 100% through deployment metadata after CLI gateway timeouts. Production database confirms a phone quiet-hours policy persisted.
+- 146 tests passed, TypeScript and Android build/lint passed, APK signature verified. Version 0.2.13 (29), final APK 8,576,228 bytes, installed on connected phone.
+- Phone inspection verified Settings card width 361 px at a 392 px viewport, checkbox row uses flex, and native DND rejects ringtone tests. Original policy restored after native test. Real background end-of-window ringtone delivery remains to be confirmed during an actual board alarm.
+
+### DND cloud-sync correction
+
+Android WebView preflight rejected the new PUT /api/push/quiet-hours request because the CORS method allowlist omitted PUT. Added PUT while retaining origin/header restrictions. Regression test exercises the real backend OPTIONS handler with Android origin and rejects an external origin. All 147 tests and backend type checks pass. Deployed Worker 265da780-3cf5-4746-a062-955f017874a6; live custom-domain OPTIONS returns 204 and explicitly allows PUT. No APK or firmware update needed. Phone was locked during the final check; user must retry Save phone DND to confirm their authenticated save.
+
+## 0.2.14 — Settings, History and Calibration polish
+
+- Removed the Cloud-history banner and routine refresh explanation, retaining history-fetch errors. Language card has a 20 px heading gap and no explanation paragraph.
+- Extracted personal DND settings into a controlled form. Save is highlighted/enabled on edits or a failed cloud sync; validation and errors stay inline. Custom themed clock dialog supports hour/minute dial, AM/PM, exact minute entry, cancel, focus restoration and Android Back without submitting the form.
+- Alert rows use a text/38 px toggle grid; descriptions wrap, all toggles align right, and Save preferences belongs to the alert card. Removed the household-preferences footer line.
+- Calibration preparation and result instructions use 14 readable bullet points; confirmation labels use flex with a fixed checkbox and wrapping text. Last-request status has proper spacing.
+- 147 existing tests, TypeScript, Android assembleDebug/lintDebug and signature verification pass. Version 0.2.14 (30), APK 8,576,403 bytes, installed on phone.
+- Actual phone at 392 px: clock dialog fits (361 px), changing the time to 20:25 highlights/enables Save, four alert switches all end at x=358, save inside alert card, aligned flex confirmation labels and no horizontal overflow on Settings/Calibration. History helper text removed. Inspection changes were discarded by navigating away; no settings or calibration commands were saved.
+- No backend or ESP32 firmware changes in this release.

@@ -20,7 +20,7 @@ vi.mock('../worker/auth', async (importOriginal) => {
 });
 import worker from '../worker/index';
 import { tokenHash, pruneTelemetry } from '../worker/telemetry';
-import { deliverPush } from '../worker/push';
+import { deliverPush, resumeQuietPhones } from '../worker/push';
 import { generateKeyPair, exportPKCS8 } from 'jose';
 let sqlite: DatabaseSync;
 function prepared(sql: string, args: unknown[] = []): any {
@@ -85,6 +85,7 @@ beforeEach(() => {
   sqlite.exec(readFileSync(new URL('../migrations/0006_low_alarm.sql', import.meta.url), 'utf8'));
   sqlite.exec(readFileSync(new URL('../migrations/0007_push.sql', import.meta.url), 'utf8'));
   sqlite.exec(readFileSync(new URL('../migrations/0008_phone_alarm.sql', import.meta.url), 'utf8'));
+  sqlite.exec(readFileSync(new URL('../migrations/0009_quiet_hours.sql', import.meta.url), 'utf8'));
   sqlite.exec(`INSERT INTO households (id,name,tank_name) VALUES ('home','Our home','Tank'),('other','Another home','Other tank');
     INSERT INTO memberships VALUES ('owner-id','home','owner','Owner','owner@example.com','owner'),
       ('viewer-id','home','viewer','Viewer','viewer@example.com','viewer'),
@@ -169,32 +170,137 @@ describe('ESP32 telemetry', () => {
   });
   it('catches up newly registered phones and queues a stop after board acknowledgement', async () => {
     await provision();
-    const first = {id:crypto.randomUUID(),token:'fcm_test_token_1234567890',alarmCapable:true};
-    await call('push/register','owner','POST',first);
-    const data=alarmSample();data.probes.forEach(p=>p.calibrated=true);
+    const first = {
+      id: crypto.randomUUID(),
+      token: 'fcm_test_token_1234567890',
+      alarmCapable: true,
+    };
+    await call('push/register', 'owner', 'POST', first);
+    const data = alarmSample();
+    data.probes.forEach((p) => (p.calibrated = true));
     expect((await upload(data)).status).toBe(200);
-    expect(sqlite.prepare('SELECT count(*) AS n FROM push_deliveries').get()).toEqual({n:4});
-    const second={id:crypto.randomUUID(),token:'fcm_other_token_1234567890',alarmCapable:true};
-    expect((await call('push/register','viewer','POST',second)).status).toBe(200);
-    expect(sqlite.prepare('SELECT count(*) AS n FROM push_deliveries').get()).toEqual({n:8});
+    expect(sqlite.prepare('SELECT count(*) AS n FROM push_deliveries').get()).toEqual({ n: 4 });
+    const second = {
+      id: crypto.randomUUID(),
+      token: 'fcm_other_token_1234567890',
+      alarmCapable: true,
+    };
+    expect((await call('push/register', 'viewer', 'POST', second)).status).toBe(200);
+    expect(sqlite.prepare('SELECT count(*) AS n FROM push_deliveries').get()).toEqual({ n: 8 });
     sqlite.prepare("UPDATE push_deliveries SET status='sent'").run();
     sqlite.prepare('UPDATE devices SET last_seen=1').run();
-    data.sampleId='c'.repeat(32); data.sentAt=Date.now()+1;
-    data.levelAlarms=data.levelAlarms.map(a=>({...a,active:false,acknowledged:true}));
+    data.sampleId = 'c'.repeat(32);
+    data.sentAt = Date.now() + 1;
+    data.levelAlarms = data.levelAlarms.map((a) => ({ ...a, active: false, acknowledged: true }));
     expect((await upload(data)).status).toBe(200);
-    expect(sqlite.prepare('SELECT count(*) AS n FROM push_stops').get()).toEqual({n:8});
+    expect(sqlite.prepare('SELECT count(*) AS n FROM push_stops').get()).toEqual({ n: 8 });
     sqlite.prepare('UPDATE devices SET last_seen=1').run();
-    data.sampleId='d'.repeat(32); data.sentAt++;
+    data.sampleId = 'd'.repeat(32);
+    data.sentAt++;
     expect((await upload(data)).status).toBe(200);
-    expect(sqlite.prepare('SELECT count(*) AS n FROM push_stops').get()).toEqual({n:8});
+    expect(sqlite.prepare('SELECT count(*) AS n FROM push_stops').get()).toEqual({ n: 8 });
+  });
+  it('lets viewers save only their own phone DND and rejects invalid schedules', async () => {
+    const id = crypto.randomUUID(),
+      quietHours = { enabled: true, start: '22:00', end: '07:00', timezone: 'Asia/Kolkata' };
+    await call('push/register', 'viewer', 'POST', {
+      id,
+      token: 'viewer_token_1234567890',
+      alarmCapable: true,
+      quietHours,
+    });
+    expect(
+      JSON.parse(
+        String(
+          sqlite.prepare('SELECT quiet_hours FROM push_installations WHERE id=?').get(id)
+            ?.quiet_hours,
+        ),
+      ),
+    ).toEqual(quietHours);
+    expect((await call('push/quiet-hours', 'owner', 'PUT', { id, quietHours })).status).toBe(409);
+    expect(
+      (
+        await call('push/quiet-hours', 'viewer', 'PUT', {
+          id,
+          quietHours: { ...quietHours, end: '22:00' },
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await call('push/quiet-hours', 'viewer', 'PUT', {
+          id,
+          quietHours: { ...quietHours, enabled: false },
+        })
+      ).status,
+    ).toBe(200);
+  });
+  it('defers quiet-time pushes and resumes only current unacknowledged alarms', async () => {
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-10-12T23:00:00Z'));
+    const send = vi.fn();
+    vi.stubGlobal('fetch', send);
+    try {
+      await provision();
+      const id = crypto.randomUUID();
+      await call('push/register', 'owner', 'POST', {
+        id,
+        token: 'owner_token_1234567890',
+        alarmCapable: true,
+        quietHours: { enabled: true, start: '22:00', end: '07:00', timezone: 'UTC' },
+      });
+      const data = alarmSample();
+      data.probes.forEach((p) => (p.calibrated = true));
+      await upload(data);
+      await deliverPush({ ...env, FCM_SERVICE_ACCOUNT: 'configured-but-unused' });
+      expect(send).not.toHaveBeenCalled();
+      expect(sqlite.prepare('SELECT DISTINCT next_at FROM push_deliveries').all()).toEqual([
+        { next_at: Date.parse('2026-10-13T07:00:00Z') },
+      ]);
+      clock.mockReturnValue(Date.parse('2026-10-13T07:00:00Z'));
+      data.sentAt = Date.now();
+      data.sampleId = 'c'.repeat(32);
+      data.levelAlarms[0].active = false;
+      data.levelAlarms[0].acknowledged = true;
+      expect((await upload(data)).status).toBe(200);
+      await resumeQuietPhones(env);
+      const keys = await generateKeyPair('RS256', { extractable: true });
+      send.mockImplementation(async (url: string) =>
+        Response.json(
+          url.includes('oauth2') ? { access_token: 'test-access' } : { name: 'accepted' },
+        ),
+      );
+      await deliverPush({
+        ...env,
+        FCM_SERVICE_ACCOUNT: JSON.stringify({
+          project_id: 'gen-lang-client-0607918582',
+          client_email: 'test@example.com',
+          private_key: await exportPKCS8(keys.privateKey),
+        }),
+      });
+      expect(
+        sqlite
+          .prepare("SELECT level FROM push_deliveries WHERE status='sent' ORDER BY level")
+          .all(),
+      ).toEqual([{ level: 50 }, { level: 80 }, { level: 100 }]);
+      const next = sqlite
+        .prepare('SELECT quiet_resume_at FROM push_installations WHERE id=?')
+        .get(id)?.quiet_resume_at;
+      expect(next).toBe(Date.parse('2026-10-14T07:00:00Z'));
+    } finally {
+      clock.mockRestore();
+      vi.unstubAllGlobals();
+    }
   });
   it('can fetch live readings without slower command/configuration queries', async () => {
-    await provision(); await upload(sample());
-    const result=await (await call('reading?controls=false')).json();
-    expect(result.reading).toBeTruthy(); expect(result.role).toBe('owner');
-    expect(result.alarmSettings).toBeUndefined(); expect(result.calibrationCommand).toBeUndefined();
-    expect((await call('reading?controls=false','foreign')).status).toBe(200);
-    const foreign=await (await call('reading?controls=false','foreign')).json();
+    await provision();
+    await upload(sample());
+    const result = await (await call('reading?controls=false')).json();
+    expect(result.reading).toBeTruthy();
+    expect(result.role).toBe('owner');
+    expect(result.alarmSettings).toBeUndefined();
+    expect(result.calibrationCommand).toBeUndefined();
+    expect((await call('reading?controls=false', 'foreign')).status).toBe(200);
+    const foreign = await (await call('reading?controls=false', 'foreign')).json();
     expect(foreign.reading).toBeNull();
   });
   it('scopes phone registrations and deletion to the signed-in member', async () => {

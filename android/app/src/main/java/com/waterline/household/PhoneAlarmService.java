@@ -35,6 +35,26 @@ public class PhoneAlarmService extends Service {
     static void save(Context c, String key, JSONObject value) { prefs(c).edit().putString(key,value.toString()).apply(); }
     static String key(String device, String level, String episode) { return device+":"+level+":"+episode; }
 
+    static boolean quiet(Context c) {
+        if(!prefs(c).getBoolean("dnd_enabled",false))return false;
+        Calendar now=Calendar.getInstance(TimeZone.getTimeZone(prefs(c).getString("dnd_timezone",TimeZone.getDefault().getID())));
+        int minute=now.get(Calendar.HOUR_OF_DAY)*60+now.get(Calendar.MINUTE),start=prefs(c).getInt("dnd_start",1320),end=prefs(c).getInt("dnd_end",420);
+        return start<end ? minute>=start && minute<end : minute>=start || minute<end;
+    }
+    static void applyQuiet(Context c) {
+        if(quiet(c)) {
+            prefs(c).edit().putBoolean("suspended",true).apply();
+            ((NotificationManager)c.getSystemService(NOTIFICATION_SERVICE)).cancel(ID);
+            if(running!=null){running.stopForeground(STOP_FOREGROUND_REMOVE);running.stopSelf();}
+        }
+    }
+    private final Runnable quietBoundary=new Runnable() {
+        @Override public void run() {
+            if(quiet(PhoneAlarmService.this)){applyQuiet(PhoneAlarmService.this);return;}
+            handler.postDelayed(this,Math.max(1000,60000-System.currentTimeMillis()%60000));
+        }
+    };
+
     public static void receive(Context context, Map<String,String> data) {
         Context c = context.getApplicationContext();
         new Handler(Looper.getMainLooper()).post(() -> {
@@ -46,13 +66,19 @@ public class PhoneAlarmService extends Service {
             try { expires=Long.parseLong(data.getOrDefault("expiresAt","0")); } catch (NumberFormatException e) { return; }
             if (expires<System.currentTimeMillis() || !prefs(c).getBoolean("enabled",false)) return;
             JSONObject closed=read(c,"closed"), active=read(c,"active");
-            if (closed.has(id) || active.has(id)) return;
+            if (closed.has(id)) return;
+            if(active.has(id)) {
+                if(!quiet(c)){prefs(c).edit().putBoolean("suspended",false).apply();resumeIfNeeded(c);}
+                return;
+            }
             try {
                 JSONObject entry=new JSONObject();
                 entry.put("episode",episode); entry.put("title",data.getOrDefault("title","Waterline alarm"));
                 entry.put("body",data.getOrDefault("body","Check your tank"));
                 entry.put("at",Long.parseLong(data.getOrDefault("eventAt",String.valueOf(System.currentTimeMillis()))));
                 active.put(id,entry); save(c,"active",active);
+                if(quiet(c)){applyQuiet(c);return;}
+                prefs(c).edit().putBoolean("suspended",false).apply();
                 ContextCompat.startForegroundService(c,new Intent(c,PhoneAlarmService.class));
             } catch (Exception e) {
                 // If Android disallows background playback, retain a visible ordinary alert.
@@ -75,7 +101,7 @@ public class PhoneAlarmService extends Service {
         List<String> ids=new ArrayList<>(); read(c,"active").keys().forEachRemaining(ids::add); finish(c,ids);
     }
     static void resumeIfNeeded(Context c) {
-        if(running==null && prefs(c).getBoolean("enabled",false) && read(c,"active").length()>0) {
+        if(running==null && !quiet(c) && !prefs(c).getBoolean("suspended",false) && prefs(c).getBoolean("enabled",false) && read(c,"active").length()>0) {
             try {ContextCompat.startForegroundService(c,new Intent(c,PhoneAlarmService.class));} catch(Exception ignored){}
         }
     }
@@ -108,13 +134,14 @@ public class PhoneAlarmService extends Service {
             .addAction(0,"Silence phone",silence).addAction(0,"Dismiss",dismiss).build();
     }
     static void show(Context c, boolean ongoing, String extra) {
+        if(quiet(c))return;
         Notification n=notification(c,extra);
         if(!ongoing) n.flags &= ~Notification.FLAG_ONGOING_EVENT;
         try { ((NotificationManager)c.getSystemService(NOTIFICATION_SERVICE)).notify(ID,n); } catch(SecurityException ignored){}
     }
     @Override public void onCreate() { super.onCreate(); running=this; }
     @Override public int onStartCommand(Intent intent,int flags,int startId) {
-        if(read(this,"active").length()==0 || !prefs(this).getBoolean("enabled",false)) {stopSelf();return START_NOT_STICKY;}
+        if(quiet(this) || read(this,"active").length()==0 || !prefs(this).getBoolean("enabled",false)) {stopSelf();return START_NOT_STICKY;}
         if(Build.VERSION.SDK_INT>=29) startForeground(ID,notification(this,""),ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
         else startForeground(ID,notification(this,""));
         if(player==null) {
@@ -132,6 +159,7 @@ public class PhoneAlarmService extends Service {
                 prefs(this).edit().remove("error").apply();
             } catch(Exception e) { prefs(this).edit().putString("error","Phone alarm audio unavailable. Check Android alarm volume and sound settings.").apply(); }
         }
+        handler.removeCallbacks(quietBoundary);handler.post(quietBoundary);
         return START_NOT_STICKY;
     }
     private void refresh() {
@@ -139,6 +167,7 @@ public class PhoneAlarmService extends Service {
         else show(this,true,"");
     }
     @Override public void onDestroy() {
+        handler.removeCallbacks(quietBoundary);
         if(player!=null){player.release();player=null;}
         if(audio!=null) {if(Build.VERSION.SDK_INT>=26 && focus!=null) audio.abandonAudioFocusRequest(focus);else audio.abandonAudioFocus(focusListener);}
         running=null;super.onDestroy();

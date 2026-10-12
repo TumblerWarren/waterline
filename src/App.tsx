@@ -1,3 +1,4 @@
+import { PhoneDndSettings } from './components/PhoneDndSettings';
 import { t, useLanguage, currentLanguage } from './language';
 import { MemberPress } from './components/MemberPress';
 import { AccessDenied } from './components/AccessDenied';
@@ -237,6 +238,11 @@ export default function App() {
   }, []);
   useNativeNavigation(
     () => {
+      const dialog = document.querySelector<HTMLDialogElement>('dialog[open]');
+      if (dialog) {
+        dialog.dispatchEvent(new Event('cancel', { cancelable: true }));
+        return;
+      }
       if (modal) setModal(null);
       else if (page !== 'overview') navigate('overview');
       else void minimizeApp();
@@ -1074,13 +1080,35 @@ export default function App() {
                         'New board alarms ring continuously on this phone. Silence or dismiss stops only the phone; acknowledge the board in the Alarm tab.',
                       )}
                     </p>
-                    <button className="button secondary" disabled={!phoneNotifications.supported || !phoneNotifications.enabled} onClick={()=>void run(phoneNotifications.testPhone)}>{t('Test phone ringtone · 10 seconds')}</button>
-                    {phoneNotifications.ringing ? <div className="message warning" role="status">
-                      <p>{t('Phone alarm is active')}</p>
-                      <button className="button secondary" onClick={()=>void run(phoneNotifications.silence)}>{t('Silence phone')}</button>
-                      <button className="text-button" onClick={()=>void run(phoneNotifications.silence)}>{t('Dismiss phone alarm')}</button>
-                    </div> : null}
-                    {phoneNotifications.phoneError ? <p className="form-error" role="alert">{t(phoneNotifications.phoneError)}</p> : null}
+                    <button
+                      className="button secondary"
+                      disabled={!phoneNotifications.supported || !phoneNotifications.enabled}
+                      onClick={() => void run(phoneNotifications.testPhone)}
+                    >
+                      {t('Test phone ringtone · 10 seconds')}
+                    </button>
+                    {phoneNotifications.ringing ? (
+                      <div className="message warning" role="status">
+                        <p>{t('Phone alarm is active')}</p>
+                        <button
+                          className="button secondary"
+                          onClick={() => void run(phoneNotifications.silence)}
+                        >
+                          {t('Silence phone')}
+                        </button>
+                        <button
+                          className="text-button"
+                          onClick={() => void run(phoneNotifications.silence)}
+                        >
+                          {t('Dismiss phone alarm')}
+                        </button>
+                      </div>
+                    ) : null}
+                    {phoneNotifications.phoneError ? (
+                      <p className="form-error" role="alert">
+                        {t(phoneNotifications.phoneError)}
+                      </p>
+                    ) : null}
                     <p role="status">
                       {phoneNotifications.supported
                         ? t(phoneNotifications.status)
@@ -1134,14 +1162,8 @@ export default function App() {
                 </>
               ) : null}
               {page === 'bluetooth' ? <NearbyBoard /> : null}
-
               {page === 'history' ? (
                 <>
-                  <p className="inline-note">
-                    {t(
-                      'Cloud history · Bluetooth readings are live and are not added to this chart.',
-                    )}
-                  </p>
                   <div className="page-heading">
                     <div>
                       <p className="eyebrow">{t('A LITTLE PERSPECTIVE')}</p>
@@ -1171,13 +1193,7 @@ export default function App() {
                     >
                       {model.historyLoading ? t('Fetching history…') : t('Refresh history')}
                     </button>
-                    <p role="status">
-                      {model.historyError
-                        ? t(model.historyError)
-                        : t(
-                            'History refreshes on opening and every 15 minutes while the app is open.',
-                          )}
-                    </p>
+                    {model.historyError ? <p role="alert">{t(model.historyError)}</p> : null}
                   </div>
                   <section className="panel full-history">
                     <div className="panel-heading">
@@ -1428,7 +1444,7 @@ export default function App() {
                 <>
                   <div className="settings-intro">
                     <section className="panel app-info">
-                      <h2>Waterline 0.2.12</h2>
+                      <h2>Waterline 0.2.14</h2>
                       <p>
                         {t('Your household’s tank, connected through Cloud or nearby Bluetooth.')}
                       </p>
@@ -1444,15 +1460,16 @@ export default function App() {
                         <option value="en">English</option>
                         <option value="bn">বাংলা</option>
                       </ThemedSelect>
-                      <p>
-                        {t(
-                          t(
-                            'Language applies to navigation and common controls. Device diagnostics retain their original wording.',
-                          ),
-                        )}
-                      </p>
                     </section>
                   </div>
+                  <PhoneDndSettings
+                    key={JSON.stringify(phoneNotifications.quietHours)}
+                    saved={phoneNotifications.quietHours}
+                    supported={phoneNotifications.supported}
+                    active={phoneNotifications.quietActive}
+                    status={phoneNotifications.dndStatus}
+                    save={phoneNotifications.saveQuietHours}
+                  />
                   <div className="page-heading">
                     <div>
                       <p className="eyebrow">{t('MAKE IT YOURS')}</p>
@@ -1533,18 +1550,13 @@ export default function App() {
                           )}
                         </p>
                       </div>
+                      <div className="settings-footer">
+                        <button className="button primary" disabled={!owner || busy} type="submit">
+                          <Check size={16} />
+                          {busy ? t('Saving…') : t('Save preferences')}
+                        </button>
+                      </div>
                     </section>
-                    <div className="settings-footer">
-                      <span>
-                        {preview
-                          ? 'Changes stay in this preview session.'
-                          : t('Preferences apply to your household.')}
-                      </span>
-                      <button className="button primary" disabled={!owner || busy} type="submit">
-                        <Check size={16} />
-                        {busy ? t('Saving…') : t('Save preferences')}
-                      </button>
-                    </div>
                   </form>
                   <section className="panel calibration-panel">
                     <div>
