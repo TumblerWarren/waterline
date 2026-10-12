@@ -215,6 +215,7 @@ export default function App() {
       navigate('alarm');
       void model.refresh();
     },
+    home?.reading,
   );
   async function signOut() {
     if (sourceInFlight.current)
@@ -1070,9 +1071,16 @@ export default function App() {
                     <h2>{t('Phone alarm notifications')}</h2>
                     <p>
                       {t(
-                        'Receive a sound notification for each new below-20%, 50%, 80% or 100% buzzer alarm. Tap it to open Waterline. Acknowledged alarms do not send another alert until re-armed.',
+                        'New board alarms ring continuously on this phone. Silence or dismiss stops only the phone; acknowledge the board in the Alarm tab.',
                       )}
                     </p>
+                    <button className="button secondary" disabled={!phoneNotifications.supported || !phoneNotifications.enabled} onClick={()=>void run(phoneNotifications.testPhone)}>{t('Test phone ringtone · 10 seconds')}</button>
+                    {phoneNotifications.ringing ? <div className="message warning" role="status">
+                      <p>{t('Phone alarm is active')}</p>
+                      <button className="button secondary" onClick={()=>void run(phoneNotifications.silence)}>{t('Silence phone')}</button>
+                      <button className="text-button" onClick={()=>void run(phoneNotifications.silence)}>{t('Dismiss phone alarm')}</button>
+                    </div> : null}
+                    {phoneNotifications.phoneError ? <p className="form-error" role="alert">{t(phoneNotifications.phoneError)}</p> : null}
                     <p role="status">
                       {phoneNotifications.supported
                         ? t(phoneNotifications.status)
@@ -1094,7 +1102,7 @@ export default function App() {
                     </button>
                     <p>
                       {t(
-                        'Sound follows Android notification volume and Do Not Disturb. Delivery needs internet and may be delayed. The board buzzer continues independently.',
+                        'Phone ringing uses Android alarm volume and respects system restrictions. A board stop event ends ringing when delivered. Without internet, use Silence or Dismiss.',
                       )}
                     </p>
                   </section>
@@ -1420,7 +1428,7 @@ export default function App() {
                 <>
                   <div className="settings-intro">
                     <section className="panel app-info">
-                      <h2>Waterline 0.2.11</h2>
+                      <h2>Waterline 0.2.12</h2>
                       <p>
                         {t('Your household’s tank, connected through Cloud or nearby Bluetooth.')}
                       </p>

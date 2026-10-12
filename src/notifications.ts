@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import { PushNotifications } from '@capacitor/push-notifications';
 import type { PluginListenerHandle } from '@capacitor/core';
 import { isNative } from './native';
+import { PhoneAlarm } from './phoneAlarm';
+import { App as NativeApp } from '@capacitor/app';
+import type { Reading } from '../shared/model';
 
 const preference = 'waterline-phone-alerts';
 const installation = 'waterline-push-installation';
@@ -19,10 +22,13 @@ export function usePhoneNotifications(
   preview: boolean,
   request: Request,
   open: () => void,
+  reading?: Reading | null,
 ) {
   const [enabled, setEnabled] = useState(
     () => isNative && localStorage.getItem(preference) === 'true',
   );
+  const [ringing, setRinging] = useState(false);
+  const [phoneError, setPhoneError] = useState('');
   const [status, setStatus] = useState('Not enabled on this phone.');
   const handlers = useRef({ request, open });
   handlers.current = { request, open };
@@ -38,6 +44,7 @@ export function usePhoneNotifications(
       if (disposed) return;
       if (permission.receive !== 'granted')
         throw new Error('Notifications are blocked. Allow them in Android app settings.');
+      await PhoneAlarm.configure({enabled:true});
       await PushNotifications.createChannel({
         id: 'waterline_alarms_v1',
         name: 'Water-level alarms',
@@ -53,6 +60,7 @@ export function usePhoneNotifications(
             .request<{ configured: boolean }>('/api/push/register', 'POST', {
               id: installationId(),
               token: token.value,
+              alarmCapable: true,
             })
             .then((result) => {
               if (!disposed)
@@ -89,11 +97,32 @@ export function usePhoneNotifications(
       for (const handle of handles) void handle.remove();
     };
   }, [authenticated, preview, enabled]);
+  useEffect(() => {
+    if (!isNative || !authenticated || preview) return;
+    void PhoneAlarm.configure({enabled}).catch(()=>setPhoneError('Phone alarm setup failed.'));
+  }, [authenticated,enabled,preview]);
+  useEffect(() => {
+    if(!isNative || !authenticated || !enabled || !reading || reading.measuredAt === null || Date.now()-reading.measuredAt>30000) return;
+    const episodes = reading.buzzerEnabled && reading.calibrated && !reading.fault
+      ? (reading.levelAlarms ?? []).filter(a=>a.enabled && a.active && !a.acknowledged).map(a=>a.episode) : [];
+    void PhoneAlarm.sync({episodes,measuredAt:reading.measuredAt}).catch(()=>{});
+  }, [authenticated,enabled,reading]);
+  useEffect(() => {
+    if(!isNative) return;
+    let disposed=false;
+    const check=async()=>{const state=await PhoneAlarm.status();if(disposed)return;setRinging(state.active);setPhoneError(state.error);if(state.open)handlers.current.open();};
+    void check().catch(()=>{});
+    const timer=window.setInterval(()=>{if(document.visibilityState==='visible')void check().catch(()=>{});},2000);
+    const listener=NativeApp.addListener('appStateChange',state=>{if(state.isActive)void check().catch(()=>{});});
+    return()=>{disposed=true;window.clearInterval(timer);void listener.then(handle=>handle.remove());};
+  },[]);
+  async function silence() {await PhoneAlarm.silence();setRinging(false);}
   const enable = () => {
     localStorage.setItem(preference, 'true');
     setEnabled(true);
   };
   async function disable() {
+    if(isNative) await PhoneAlarm.configure({enabled:false});
     setEnabled(false);
     localStorage.removeItem(preference);
     const id = localStorage.getItem(installation);
@@ -109,5 +138,5 @@ export function usePhoneNotifications(
       setStatus('Disabled on this phone.');
     }
   }
-  return { enabled, status, enable, disable, supported: isNative && !preview && authenticated };
+  return { enabled, status, enable, disable, ringing, phoneError, silence, testPhone: () => PhoneAlarm.test(), supported: isNative && !preview && authenticated };
 }

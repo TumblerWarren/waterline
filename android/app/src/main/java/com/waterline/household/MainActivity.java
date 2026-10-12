@@ -7,6 +7,7 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(WaterlineAuthPlugin.class);
+        registerPlugin(PhoneAlarmPlugin.class);
         super.onCreate(savedInstanceState);
     }
 }

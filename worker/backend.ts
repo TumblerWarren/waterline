@@ -17,7 +17,15 @@ export default {
       );
     if (request.method === 'OPTIONS') return preflight(request);
     const usage = measureDatabase(env.DB);
-    const result = await api.fetch(request, { ...env, DB: usage.DB }, ctx);
+    const background: Promise<unknown>[] = [];
+    const result = await api.fetch(request, { ...env, DB: usage.DB }, {
+      waitUntil(promise: Promise<unknown>) { background.push(promise); ctx.waitUntil(promise); },
+    });
+    const foreground = { ...usage.stats };
+    if (background.length) ctx.waitUntil(Promise.allSettled(background).then(() => {
+      console.log(JSON.stringify({event:'db_usage',operation:new URL(request.url).pathname,phase:'background',
+        queries:usage.stats.queries-foreground.queries,rowsRead:usage.stats.rowsRead-foreground.rowsRead,rowsWritten:usage.stats.rowsWritten-foreground.rowsWritten}));
+    }));
     // Sample successful traffic, always include database-related failures.
     if (result.status >= 500 || Math.random() < 0.1) {
       console.log(
@@ -25,7 +33,8 @@ export default {
           event: 'db_usage',
           operation: new URL(request.url).pathname,
           status: result.status,
-          ...usage.stats,
+          phase: 'foreground',
+          ...foreground,
         }),
       );
     }

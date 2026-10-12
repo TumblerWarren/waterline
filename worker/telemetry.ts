@@ -4,8 +4,11 @@ import type { Band, Reading, Probe, HistoryPoint } from '../shared/model';
 import { calibrationReply, latestCalibration } from './calibration';
 import { buzzerReply, latestBuzzer } from './buzzer';
 import { alarmTelemetry, alarmReply, readAlarmSettings, alarmAcknowledgements } from './alarms';
-import { queueAlarmPush, deliverPush } from './push';
+import { queueAlarmPush, queueStoppedAlarms, deliverPush } from './push';
 
+function soundingEpisodes(r: Reading) {
+  return r.buzzerEnabled && !r.fault && r.calibrated ? (r.levelAlarms ?? []).filter(a => a.enabled && a.active && !a.acknowledged).map(a => `${a.level}:${a.episode}`) : [];
+}
 export async function tokenHash(token: string) {
   return Array.from(
     new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token))),
@@ -260,8 +263,11 @@ export async function ingestTelemetry(
   const command = await calibrationReply(env, device.id, data, reading, now);
   const buzzer = await buzzerReply(env, device.id, data, reading, now);
   const alarmHeaders = await alarmReply(env, device.id, reading, now);
-  await queueAlarmPush(env, device.id, reading, now);
-  if (typeof ctx?.waitUntil === 'function')
+  const currentEpisodes = new Set((previous ? soundingEpisodes(previous) : []));
+  const newAlarm = soundingEpisodes(reading).some((episode) => !currentEpisodes.has(episode));
+  const starts = newAlarm ? await queueAlarmPush(env, device.id, reading, now) : false;
+  const stops = await queueStoppedAlarms(env, device.id, previous, reading, now);
+  if ((starts || stops) && typeof ctx?.waitUntil === 'function')
     ctx.waitUntil(
       deliverPush(env).catch(() => console.error(JSON.stringify({ event: 'push_worker_failed' }))),
     );
@@ -282,6 +288,7 @@ export async function householdTelemetry(
   householdId: string,
   includeHistory = true,
   freshHistory = false,
+  includeControls = true,
 ) {
   const device = await env.DB.prepare(
     'SELECT id, last_seen, latest FROM devices WHERE household_id = ? AND enabled = 1',
@@ -385,8 +392,12 @@ export async function householdTelemetry(
   } else points = { results: [] };
   return {
     reading,
-    alarmSettings: device ? await readAlarmSettings(env, device.id) : undefined,
+    ...(includeControls ? {
+    alarmSettings: device ? await readAlarmSettings(env, device.id, reading ?? undefined) : undefined,
     alarmAcknowledgements: device ? await alarmAcknowledgements(env, device.id) : [],
+    calibrationCommand: device ? await latestCalibration(env, device.id) : null,
+    buzzerCommand: device ? await latestBuzzer(env, device.id) : null,
+    } : {}),
     history: points.results.flatMap((point, index) => {
       const previous = points.results[index - 1];
       return previous &&
@@ -400,12 +411,11 @@ export async function householdTelemetry(
           ]
         : [{ at: point.at, band: point.band }];
     }),
-    calibrationCommand: device ? await latestCalibration(env, device.id) : null,
-    buzzerCommand: device ? await latestBuzzer(env, device.id) : null,
   };
 }
 
 export async function pruneTelemetry(env: ApiEnv, now = Date.now()) {
+  await env.DB.prepare('DELETE FROM alarm_acknowledgements WHERE expires_at<?').bind(now - 60000).run();
   // One scheduled cleanup replaces a delete on every ten-second heartbeat.
   const devices = await env.DB.prepare('SELECT id FROM devices').all<{ id: string }>();
   for (const device of devices.results) {

@@ -67,14 +67,14 @@ export function alarmTelemetry(data: Record<string, unknown>) {
   });
   return { alarmRevision: data.alarmRevision as number, levelAlarms: alarms };
 }
-export async function readAlarmSettings(env: ApiEnv, deviceId: string) {
+export async function readAlarmSettings(env: ApiEnv, deviceId: string, supplied?: Reading) {
   const row = await env.DB.prepare('SELECT revision,rules FROM alarm_settings WHERE device_id=?')
     .bind(deviceId)
     .first<{ revision: number; rules: string }>();
-  const device = await env.DB.prepare('SELECT latest FROM devices WHERE id=?')
+  const device = supplied ? null : await env.DB.prepare('SELECT latest FROM devices WHERE id=?')
     .bind(deviceId)
     .first<{ latest: string | null }>();
-  const reported = device?.latest ? (JSON.parse(device.latest) as Reading) : null;
+  const reported = supplied ?? (device?.latest ? (JSON.parse(device.latest) as Reading) : null);
   // Local Bluetooth edits are authoritative once a newer board revision uploads.
   if (
     reported?.levelAlarms?.length === 4 &&
@@ -173,9 +173,6 @@ export async function alarmAcknowledgements(
 }
 export async function alarmReply(env: ApiEnv, deviceId: string, reading: Reading, now: number) {
   if (!reading.levelAlarms || reading.alarmRevision === undefined) return {};
-  await env.DB.prepare('DELETE FROM alarm_acknowledgements WHERE device_id=? AND expires_at<?')
-    .bind(deviceId, now - 60000)
-    .run();
   const rows = await env.DB.prepare(
     "SELECT level,episode,expires_at FROM alarm_acknowledgements WHERE device_id=? AND status='queued' AND expires_at>=?",
   )
@@ -197,7 +194,7 @@ export async function alarmReply(env: ApiEnv, deviceId: string, reading: Reading
         .run();
     } else pending.push(`${row.level}:${row.episode}:${Math.floor(row.expires_at / 1000)}`);
   }
-  const config = await readAlarmSettings(env, deviceId);
+  const config = await readAlarmSettings(env, deviceId, reading);
   return {
     ...(config.revision > reading.alarmRevision && reading.levelAlarms.length === 4
       ? {

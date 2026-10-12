@@ -462,5 +462,11 @@
   "Long press your own membership to leave the household.": "পরিবার থেকে বের হতে নিজের সদস্যপদের কার্ড চেপে ধরে রাখুন।",
   "Fetching history…": "ইতিহাস আনা হচ্ছে…",
   "Refresh history": "ইতিহাস হালনাগাদ করুন",
-  "History refreshes on opening and every 15 minutes while the app is open.": "এই পাতা খোলার সময় এবং অ্যাপ খোলা থাকলে প্রতি ১৫ মিনিটে ইতিহাস হালনাগাদ হয়।"
+  "History refreshes on opening and every 15 minutes while the app is open.": "এই পাতা খোলার সময় এবং অ্যাপ খোলা থাকলে প্রতি ১৫ মিনিটে ইতিহাস হালনাগাদ হয়।",
+  "Phone alarm is active": "ফোনের অ্যালার্ম সক্রিয় আছে",
+  "Silence phone": "ফোনের শব্দ বন্ধ করুন",
+  "Dismiss phone alarm": "ফোনের অ্যালার্ম বন্ধ করুন",
+  "New board alarms ring continuously on this phone. Silence or dismiss stops only the phone; acknowledge the board in the Alarm tab.": "বোর্ডের নতুন অ্যালার্ম হলে এই ফোনে একটানা শব্দ হবে। ফোনের শব্দ বন্ধ করলে শুধু ফোন থামবে; অ্যালার্ম ট্যাবে বোর্ডের অ্যালার্ম স্বীকার করুন।",
+  "Phone ringing uses Android alarm volume and respects system restrictions. A board stop event ends ringing when delivered. Without internet, use Silence or Dismiss.": "ফোনের শব্দ অ্যান্ড্রয়েডের অ্যালার্ম ভলিউম ও সিস্টেমের নিয়ম মেনে চলে। বোর্ডের বন্ধ হওয়ার বার্তা এলে শব্দ থামবে। ইন্টারনেট না থাকলে ফোনের শব্দ বা অ্যালার্ম বন্ধ করুন।",
+  "Test phone ringtone · 10 seconds": "ফোনের রিংটোন পরীক্ষা · ১০ সেকেন্ড"
 }

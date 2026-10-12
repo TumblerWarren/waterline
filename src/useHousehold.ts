@@ -120,6 +120,7 @@ export function useHousehold(preview: boolean) {
     let fetching = false;
     let nextPoll = 0;
     let failures = 0;
+    let lastControls = 0;
     const poll = async () => {
       if (fetching || document.visibilityState === 'hidden' || Date.now() < nextPoll) return;
       fetching = true;
@@ -133,6 +134,8 @@ export function useHousehold(preview: boolean) {
           lastHouseholdFetch.current = now;
           setLive(data);
         } else {
+          const pendingBefore = [liveRef.current?.calibrationCommand?.status,liveRef.current?.buzzerCommand?.status,...(liveRef.current?.alarmAcknowledgements?.map(a=>a.status) ?? [])].some(s=>s==='queued'||s==='started');
+          const controls = pendingBefore || now-lastControls>=120000;
           const data =
             await request<
               Pick<
@@ -144,7 +147,8 @@ export function useHousehold(preview: boolean) {
                 | 'alarmSettings'
                 | 'alarmAcknowledgements'
               >
-            >('/api/reading');
+            >(`/api/reading?controls=${controls}`);
+          if(controls) lastControls=now;
           if (!active) return;
           // Merge into the current state so in-flight updates cannot erase history.
           setLive((current) => {

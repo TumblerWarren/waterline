@@ -84,6 +84,7 @@ beforeEach(() => {
   );
   sqlite.exec(readFileSync(new URL('../migrations/0006_low_alarm.sql', import.meta.url), 'utf8'));
   sqlite.exec(readFileSync(new URL('../migrations/0007_push.sql', import.meta.url), 'utf8'));
+  sqlite.exec(readFileSync(new URL('../migrations/0008_phone_alarm.sql', import.meta.url), 'utf8'));
   sqlite.exec(`INSERT INTO households (id,name,tank_name) VALUES ('home','Our home','Tank'),('other','Another home','Other tank');
     INSERT INTO memberships VALUES ('owner-id','home','owner','Owner','owner@example.com','owner'),
       ('viewer-id','home','viewer','Viewer','viewer@example.com','viewer'),
@@ -165,6 +166,36 @@ describe('ESP32 telemetry', () => {
       acknowledged: false,
       episode: String(level).padStart(32, 'a'),
     })),
+  });
+  it('catches up newly registered phones and queues a stop after board acknowledgement', async () => {
+    await provision();
+    const first = {id:crypto.randomUUID(),token:'fcm_test_token_1234567890',alarmCapable:true};
+    await call('push/register','owner','POST',first);
+    const data=alarmSample();data.probes.forEach(p=>p.calibrated=true);
+    expect((await upload(data)).status).toBe(200);
+    expect(sqlite.prepare('SELECT count(*) AS n FROM push_deliveries').get()).toEqual({n:4});
+    const second={id:crypto.randomUUID(),token:'fcm_other_token_1234567890',alarmCapable:true};
+    expect((await call('push/register','viewer','POST',second)).status).toBe(200);
+    expect(sqlite.prepare('SELECT count(*) AS n FROM push_deliveries').get()).toEqual({n:8});
+    sqlite.prepare("UPDATE push_deliveries SET status='sent'").run();
+    sqlite.prepare('UPDATE devices SET last_seen=1').run();
+    data.sampleId='c'.repeat(32); data.sentAt=Date.now()+1;
+    data.levelAlarms=data.levelAlarms.map(a=>({...a,active:false,acknowledged:true}));
+    expect((await upload(data)).status).toBe(200);
+    expect(sqlite.prepare('SELECT count(*) AS n FROM push_stops').get()).toEqual({n:8});
+    sqlite.prepare('UPDATE devices SET last_seen=1').run();
+    data.sampleId='d'.repeat(32); data.sentAt++;
+    expect((await upload(data)).status).toBe(200);
+    expect(sqlite.prepare('SELECT count(*) AS n FROM push_stops').get()).toEqual({n:8});
+  });
+  it('can fetch live readings without slower command/configuration queries', async () => {
+    await provision(); await upload(sample());
+    const result=await (await call('reading?controls=false')).json();
+    expect(result.reading).toBeTruthy(); expect(result.role).toBe('owner');
+    expect(result.alarmSettings).toBeUndefined(); expect(result.calibrationCommand).toBeUndefined();
+    expect((await call('reading?controls=false','foreign')).status).toBe(200);
+    const foreign=await (await call('reading?controls=false','foreign')).json();
+    expect(foreign.reading).toBeNull();
   });
   it('scopes phone registrations and deletion to the signed-in member', async () => {
     const registration = { id: crypto.randomUUID(), token: 'fcm_test_token_1234567890' };

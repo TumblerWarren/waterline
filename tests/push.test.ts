@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { pushMessage, soundingAlarms } from '../worker/push';
+import { pushMessage, soundingAlarms, phoneAlarmMessage } from '../worker/push';
 import { scenarioReading } from '../src/demo';
 
 describe('phone alarm notifications', () => {
@@ -18,6 +18,13 @@ describe('phone alarm notifications', () => {
         episode: 'a'.repeat(32),
       },
     ],
+  });
+  it('uses data-only start/stop events with episode identity for native alarms', () => {
+    const start=phoneAlarmMessage('token','device',20,'a'.repeat(32),'Tank','start').message;
+    expect(start.data).toMatchObject({kind:'waterline_alarm',action:'start',device:'device',level:'20',episode:'a'.repeat(32)});
+    expect(start).not.toHaveProperty('notification');expect(start.android.ttl).toBe('60s');
+    const stop=phoneAlarmMessage('token','device',20,'a'.repeat(32),'Tank','stop').message;
+    expect(stop.data.action).toBe('stop');expect(stop.android.ttl).toBe('86400s');
   });
   it('uses an audible high-priority notification on the alarm channel', () => {
     const message = pushMessage('test-token', 20, 'Roof tank').message;
