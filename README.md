@@ -246,19 +246,19 @@ The local UI runs at `http://127.0.0.1:5173`. Authenticated cloud features requi
 
 ### Android configuration and build
 
-Copy `app/.env.android.example` to `app/.env.android.local` and set the public values:
+Copy `app/.env.android.example` to `app/.env.android.local` and set the public values. The domains below are placeholders; replace them with your Auth0 domain, API audience and backend address:
 
 ```dotenv
-VITE_AUTH0_DOMAIN=auth.devbuildtool.com
+VITE_AUTH0_DOMAIN=your-tenant.auth0.com
 VITE_AUTH0_CLIENT_ID=YOUR_NATIVE_CLIENT_ID
-VITE_AUTH0_AUDIENCE=https://waterline.devbuildtool.com/api
-VITE_API_BASE_URL=https://waterline.devbuildtool.com
+VITE_AUTH0_AUDIENCE=https://api.example.com/api
+VITE_API_BASE_URL=https://api.example.com
 ```
 
 Register the callback/logout URL in the Auth0 Native application:
 
 ```text
-com.waterline.household://auth.devbuildtool.com/android/com.waterline.household/callback
+com.waterline.household://your-tenant.auth0.com/android/com.waterline.household/callback
 ```
 
 Authorize that application for user-delegated access to the API. Configure refresh-token support for session renewal. For phone notifications, supply the Firebase Android configuration at `app/android/app/google-services.json`.
@@ -286,7 +286,7 @@ Output: `app/android/app/build/outputs/apk/debug/app-debug.apk`. Run `android:sy
 npm run db:migrate:remote
 npm run backend:check
 npm run backend:deploy
-node scripts/verify-backend.mjs https://waterline.devbuildtool.com
+node scripts/verify-backend.mjs https://api.example.com
 ```
 
 `backend:check` is a dry run; `backend:deploy` publishes. `wrangler.jsonc` is the optional browser application configuration, so use the dedicated backend command to update the API. See [BACKEND.md](app/BACKEND.md) for provisioning details; early deployment notes there describe earlier behavior, superseded by the current summary above.
