@@ -337,3 +337,7 @@ The latest local APK was approximately **8.18 MiB** (8,576,403 bytes). It is a d
 - [Firmware, sensing and installation](ESP32_Water_Level_Detector/README.md)
 
 Some component documents retain early deployment/version notes. Use this README for current behavior and the release notes for later changes. Credentials and household exports must remain outside source control, including in this private repository.
+
+## License
+
+This project is licensed under the [MIT License](LICENSE). Third-party dependencies retain their respective licenses.
