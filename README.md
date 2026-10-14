@@ -93,6 +93,12 @@ sequenceDiagram
 | Common electrode | GPIO14 | Pulsed probe excitation |
 | Buzzer output | GPIO23 | Local alarm output through the detector's buzzer circuit |
 
+### Hardware prototype
+
+![Waterline ESP32 breadboard prototype with probe sensing components and USB power](docs/images/esp32-hardware-prototype.png)
+
+The physical ESP32 prototype with its probe sensing components, jumper wiring and USB power connection.
+
 ### Reference sensing schematic
 
 ![ESP32 water-level detector sensing circuit and buzzer driver](ESP32_water_level_no_relay_final.png)
