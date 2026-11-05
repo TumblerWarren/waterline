@@ -38,12 +38,25 @@ public class PhoneAlarmPlugin extends Plugin {
         new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(()->PhoneAlarmService.finish(getContext(),Collections.singleton(PhoneAlarmService.key("phone-test","20",episode))),10000);
         call.resolve();
     }
+    @PluginMethod public void finishAcknowledgement(PluginCall call) {
+        JSArray ids=call.getArray("ids",new JSArray());
+        List<String> finished=new ArrayList<>();
+        for(int n=0;n<ids.length();n++) finished.add(ids.optString(n));
+        getActivity().runOnUiThread(() -> {PhoneAlarmService.finish(getContext(),finished);call.resolve();});
+    }
     @PluginMethod public void status(PluginCall call) {
         getActivity().runOnUiThread(()->PhoneAlarmService.resumeIfNeeded(getContext()));
         JSObject result=new JSObject();result.put("active",PhoneAlarmService.read(getContext(),"active").length()>0);
         result.put("quiet",PhoneAlarmService.quiet(getContext()));
         result.put("suspended",PhoneAlarmService.prefs(getContext()).getBoolean("suspended",false));
         result.put("error",PhoneAlarmService.prefs(getContext()).getString("error",""));
+        if(call.getBoolean("consumeAcknowledgement",false)) {
+            ArrayList<String> ids=getActivity().getIntent().getStringArrayListExtra("phone_alarm_ack");
+            if(ids!=null) {
+                result.put("acknowledge",new JSArray(ids));
+                getActivity().getIntent().removeExtra("phone_alarm_ack");
+            }
+        }
         boolean open=getActivity().getIntent().getBooleanExtra("phone_alarm_page",false);
         getActivity().getIntent().removeExtra("phone_alarm_page");result.put("open",open);call.resolve(result);
     }

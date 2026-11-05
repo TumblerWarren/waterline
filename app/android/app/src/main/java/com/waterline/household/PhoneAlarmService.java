@@ -10,7 +10,7 @@ import androidx.core.content.ContextCompat;
 import org.json.*;
 import java.util.*;
 
-/** Local audio only. This service never acknowledges or sends commands to the board. */
+/** Local audio only. Notification acknowledgement is handed to the authenticated app. */
 public class PhoneAlarmService extends Service {
     private static final String CHANNEL = "waterline_phone_ring_v1";
     private static final int ID = 4201;
@@ -124,14 +124,18 @@ public class PhoneAlarmService extends Service {
         if(keys.hasNext()) { JSONObject entry=active.optJSONObject(keys.next()); if(entry!=null){title=entry.optString("title",title);body=entry.optString("body",body);} }
         Intent open=new Intent(c,MainActivity.class).putExtra("phone_alarm_page",true).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP|Intent.FLAG_ACTIVITY_CLEAR_TOP);
         PendingIntent view=PendingIntent.getActivity(c,4202,open,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
-        Intent stop=new Intent(c,PhoneAlarmReceiver.class).setAction("silence");
-        PendingIntent silence=PendingIntent.getBroadcast(c,4203,stop,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
+        ArrayList<String> alarmIds=new ArrayList<>();
+        active.keys().forEachRemaining(alarmIds::add);
+        Intent acknowledge=new Intent(c,MainActivity.class)
+            .putExtra("phone_alarm_page",true).putStringArrayListExtra("phone_alarm_ack",alarmIds)
+            .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP|Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        PendingIntent ack=PendingIntent.getActivity(c,4205,acknowledge,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
         PendingIntent dismiss=PendingIntent.getBroadcast(c,4204,new Intent(c,PhoneAlarmReceiver.class).setAction("dismiss"),PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
         return new NotificationCompat.Builder(c,CHANNEL).setSmallIcon(R.drawable.ic_waterline_notification)
             .setContentTitle(title).setContentText(extra.isEmpty()?body:extra).setStyle(new NotificationCompat.BigTextStyle().bigText(extra.isEmpty()?body:extra))
             .setContentIntent(view).setDeleteIntent(dismiss).setOngoing(true).setOnlyAlertOnce(true)
             .setCategory(NotificationCompat.CATEGORY_ALARM).setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
-            .addAction(0,"Silence phone",silence).addAction(0,"Dismiss",dismiss).build();
+            .addAction(0,"Acknowledge",ack).addAction(0,"Dismiss",dismiss).build();
     }
     static void show(Context c, boolean ongoing, String extra) {
         if(quiet(c))return;

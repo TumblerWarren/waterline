@@ -499,5 +499,6 @@
   "Keep every electrode from touching another.": "ইলেকট্রোড যেন পরস্পরকে না ছোঁয়।",
   "After WET finishes, allow about 15 seconds for stable confirmation.": "ভেজা ক্যাপচার শেষ হলে স্থিতিশীল নিশ্চিতকরণের জন্য প্রায় ১৫ সেকেন্ড অপেক্ষা করুন।",
   "Then test each electrode transition.": "তারপর প্রতিটি ইলেকট্রোডের অবস্থার পরিবর্তন পরীক্ষা করুন।",
-  "Tank readings should follow 20% → 50% → 80% → 100% as water rises.": "জল বাড়লে ট্যাঙ্কের রিডিং ২০% → ৫০% → ৮০% → ১০০% হওয়া উচিত।"
+  "Tank readings should follow 20% → 50% → 80% → 100% as water rises.": "জল বাড়লে ট্যাঙ্কের রিডিং ২০% → ৫০% → ৮০% → ১০০% হওয়া উচিত।",
+  "New board alarms ring continuously on this phone. Acknowledge in the notification opens Waterline and requests board acknowledgement. Dismiss stops only the phone alarm.": "নতুন বোর্ড অ্যালার্ম এই ফোনে একটানা বাজে। নোটিফিকেশনে Acknowledge চাপলে Waterline খুলে বোর্ডে স্বীকৃতির অনুরোধ পাঠায়। Dismiss শুধু ফোনের অ্যালার্ম বন্ধ করে।"
 }
