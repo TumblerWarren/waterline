@@ -328,6 +328,7 @@ The latest local APK was approximately **8.18 MiB** (8,576,403 bytes). It is a d
 
 ## Further documentation
 
+- [GitHub Actions builds and main branch protection](docs/GITHUB_ACTIONS.md)
 - [Android setup](app/ANDROID.md)
 - [Backend deployment and provisioning](app/BACKEND.md)
 - [Bluetooth pairing and protocol](app/BLUETOOTH.md)
