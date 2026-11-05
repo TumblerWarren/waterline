@@ -1077,7 +1077,7 @@ export default function App() {
                     <h2>{t('Phone alarm notifications')}</h2>
                     <p>
                       {t(
-                        'New board alarms ring continuously on this phone. Silence or dismiss stops only the phone; acknowledge the board in the Alarm tab.',
+                        'New board alarms ring continuously on this phone. Acknowledge in the notification opens Waterline and requests board acknowledgement. Dismiss stops only the phone alarm.',
                       )}
                     </p>
                     <button

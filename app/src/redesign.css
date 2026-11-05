@@ -2045,3 +2045,19 @@ body,
 .history-refresh-controls { margin-bottom:22px; }
 
 .settings-panel .setting-row input.switch:checked::before { transform:translateX(18px); }
+
+/* Alarm actions need their natural width, unlike the settings switch column. */
+.level-alarm-panel .setting-row.alarm-row {
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+}
+.level-alarm-panel .alarm-row > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.level-alarm-panel .alarm-row > .button {
+  justify-self: start;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}

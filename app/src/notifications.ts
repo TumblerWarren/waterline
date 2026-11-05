@@ -5,6 +5,7 @@ import { isNative } from './native';
 import { PhoneAlarm } from './phoneAlarm';
 import { App as NativeApp } from '@capacitor/app';
 import { defaultQuietHours, validQuietHours, type QuietHours } from '../shared/quietHours';
+import { acknowledgeNotification } from './notificationAcknowledgement';
 import type { Reading } from '../shared/model';
 
 const preference = 'waterline-phone-alerts';
@@ -41,9 +42,10 @@ export function usePhoneNotifications(
   const [quietActive, setQuietActive] = useState(false);
   const [ringing, setRinging] = useState(false);
   const [phoneError, setPhoneError] = useState('');
+  const [acknowledgementError, setAcknowledgementError] = useState('');
   const [status, setStatus] = useState('Not enabled on this phone.');
-  const handlers = useRef({ request, open });
-  handlers.current = { request, open };
+  const handlers = useRef({ request, open, authenticated, preview });
+  handlers.current = { request, open, authenticated, preview };
   useEffect(() => {
     if (!isNative || preview || !authenticated || !enabled) return;
     let disposed = false;
@@ -136,13 +138,40 @@ export function usePhoneNotifications(
   useEffect(() => {
     if (!isNative) return;
     let disposed = false;
+    let checking = false;
     const check = async () => {
-      const state = await PhoneAlarm.status();
-      if (disposed) return;
-      setRinging(state.active && !state.quiet && !state.suspended);
-      setQuietActive(state.quiet);
-      setPhoneError(state.error);
-      if (state.open) handlers.current.open();
+      if (checking) return;
+      checking = true;
+      try {
+        const state = await PhoneAlarm.status({
+          consumeAcknowledgement: handlers.current.authenticated && !handlers.current.preview,
+        });
+        if (disposed) return;
+        setRinging(state.active && !state.quiet && !state.suspended);
+        setQuietActive(state.quiet);
+        setPhoneError(state.error);
+        if (state.open || state.acknowledge?.length) handlers.current.open();
+        if (state.acknowledge?.length) {
+          setAcknowledgementError('');
+          try {
+            await acknowledgeNotification(
+              state.acknowledge,
+              handlers.current.request,
+              PhoneAlarm.finishAcknowledgement,
+            );
+            setStatus('Acknowledgement sent. Waiting for board confirmation.');
+            handlers.current.open();
+          } catch (error) {
+            setAcknowledgementError(
+              error instanceof Error
+                ? error.message
+                : 'Acknowledgement failed. Retry in the Alarm tab.',
+            );
+          }
+        }
+      } finally {
+        checking = false;
+      }
     };
     void check().catch(() => {});
     const timer = window.setInterval(() => {
@@ -211,7 +240,7 @@ export function usePhoneNotifications(
     enable,
     disable,
     ringing,
-    phoneError,
+    phoneError: acknowledgementError || phoneError,
     silence,
     testPhone: () => PhoneAlarm.test(),
     supported: isNative && !preview && authenticated,
